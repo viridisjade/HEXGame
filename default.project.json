@@ -9,10 +9,97 @@
       "$path": "src/ServerScriptService"
     },
     "StarterGui": {
+      "$className": "StarterGui",
+      "ArmyGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/ArmyGui"
+      },
+      "CameraGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/CameraGui"
+      },
+      "CampGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/CampGui"
+      },
+      "CityGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/CityGui"
+      },
+      "CombatGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/CombatGui"
+      },
+      "EmpireOverlayGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/EmpireOverlayGui"
+      },
+      "MovementGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/MovementGui"
+      },
+      "RoundTimerGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/RoundTimerGui"
+      },
+      "StartScreenGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/StartScreenGui"
+      },
+      "TechTreeGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/TechTreeGui"
+      },
+      "TestGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/TestGui"
+      },
+      "UnitTestGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/UnitTestGui"
+      },
       "$properties": {
         "ScreenOrientation": "Sensor"
-      },
-      "$path": "src/StarterGui"
+      }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
