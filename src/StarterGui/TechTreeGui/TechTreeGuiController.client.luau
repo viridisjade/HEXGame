@@ -5,6 +5,19 @@
     Complete tech tree UI. The whole layout is built at runtime
     (ensure pattern), so nothing has to be modelled in Studio.
 
+    TIER SYSTEM (Bronze -> Silver -> Gold)
+        Every tech has 3 tiers. A tech's level (0-3) is stored on the server.
+        The buttons show the CURRENT tier in their name; the queue shows the
+        TARGET tier (the one currently being researched).
+
+    BUTTON STATES
+        grey   = not researched, not queued   -> click queues the NEXT tier
+        blue   = in queue (tier being researched) -> click removes it
+        bronze = tier 1 reached
+        silver = tier 2 reached
+        gold   = tier 3 reached (MAX, not clickable)
+        dimmed = queued but no RP income      -> would never finish
+
     LAYOUT (full paths, auto created when missing)
         TechTreeGui > TechTreeOverlay
           TitleLabel          (TextLabel)
@@ -16,15 +29,10 @@
               TechList        (ScrollingFrame)  > TechButton_<TechId>
           QueuePanel          (Frame, bottom)
             QueueTitle        (TextLabel)
-            QueueList         (ScrollingFrame, horizontal)
             TotalRPLabel      (TextLabel)
+            ActiveTechFrame   (queue position 1, large)
+            WaitingQueueFrame (queue positions 2+, wrapping grid)
           Tooltip             (Frame, follows the mouse)
-
-    BUTTON STATES
-        grey   = not researched, not queued   -> click adds to the queue
-        blue   = queued (being researched)    -> click removes it
-        green  = researched                   -> click does nothing
-        dimmed = queued but no RP income      -> would never finish
 --]]
 
 local Players = game:GetService("Players")
@@ -56,7 +64,9 @@ gui.IgnoreGuiInset = true
 local COLORS = {
 	locked     = Color3.fromRGB(52, 56, 68),   -- grey  = available
 	queued     = Color3.fromRGB(48, 96, 170),  -- blue  = in queue
-	done       = Color3.fromRGB(46, 130, 62),  -- green = researched
+	bronze     = Color3.fromRGB(150, 92, 42),  -- brown = tier 1 reached
+	silver     = Color3.fromRGB(178, 184, 194),-- light = tier 2 reached
+	gold       = Color3.fromRGB(198, 165, 0),  -- gold  = tier 3 (max)
 	stalled    = Color3.fromRGB(38, 40, 48),   -- dark  = queued without RP
 	text       = Color3.fromRGB(238, 240, 248),
 	textDim    = Color3.fromRGB(168, 174, 190),
@@ -272,7 +282,7 @@ end)
 -- TOOLTIP
 --------------------------------------------------------------------------------
 local tooltip = ensure(overlay, "Frame", "Tooltip", function(f)
-	f.Size = UDim2.fromOffset(280, 96)
+	f.Size = UDim2.fromOffset(300, 110)
 	f.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
 	f.BorderSizePixel = 0
 	f.Visible = false
@@ -308,7 +318,7 @@ end)
 -- CLIENT STATE
 --------------------------------------------------------------------------------
 local state = {
-	researchedTechs = {},
+	techLevels = {},
 	researchQueue = {},
 	currentProgress = {},
 	totalRPPerRound = 0,
@@ -321,8 +331,17 @@ local categoryLabels = {}  -- category -> header label
 --------------------------------------------------------------------------------
 -- HELPERS
 --------------------------------------------------------------------------------
+local function GetLevel(techId)
+	return state.techLevels[techId] or 0
+end
+
+local function isMaxed(techId)
+	return GetLevel(techId) >= TechConfig.MAX_LEVEL
+end
+
+-- Researched = at least tier 1.
 local function isResearched(techId)
-	return state.researchedTechs[techId] == true
+	return GetLevel(techId) >= 1
 end
 
 local function queueIndex(techId)
@@ -332,24 +351,66 @@ local function queueIndex(techId)
 	return nil
 end
 
--- FormatTechEffect(techId) -> readable multi line text
+local function TierLabel(techId, level)
+	local name = TechConfig.GetLevelName(level)
+	local tech = TechConfig.GetTech(techId)
+	if (not name) or name == "" then return tech and tech.Name or techId end
+	return ("[%s] %s"):format(name, tech and tech.Name or techId)
+end
+
+-- LevelColor(level) -> the button background colour for a reached tier.
+local function LevelColor(level)
+	if level == 1 then return COLORS.bronze end
+	if level == 2 then return COLORS.silver end
+	if level == 3 then return COLORS.gold end
+	return COLORS.locked
+end
+
+--------------------------------------------------------------------------------
+-- FormatTechEffect(techId) -> readable multi line text (for the tooltip)
+--------------------------------------------------------------------------------
 local function FormatTechEffect(techId)
 	local tech = TechConfig.GetTech(techId)
 	if not tech then return "" end
 
+	local level = GetLevel(techId)
 	local lines = { tech.Description }
-	table.insert(lines, ("Kosten: %d RP"):format(tech.Cost))
 
-	local progress = state.currentProgress[techId]
-	if isResearched(techId) then
-		table.insert(lines, "Status: erforscht")
-	elseif progress then
-		table.insert(lines, ("Fortschritt: %d / %d RP")
-			:format(progress.current or 0, progress.max or tech.Cost))
-		if (progress.roundsLeft or -1) >= 0 then
-			table.insert(lines, ("Noch ca. %d Runden"):format(progress.roundsLeft))
+	-- Current tier effect (only when at least tier 1 reached).
+	if level >= 1 then
+		local cur = TechConfig.GetTechLevel(techId, level)
+		if cur then
+			table.insert(lines, ("Aktuell [%s]: %s"):format(
+				TechConfig.GetLevelName(level), cur.Desc))
 		end
 	end
+
+	-- Next tier (cost of the tier currently / next to be researched).
+	local nextLevel = TechConfig.GetNextLevel(level)
+	if nextLevel then
+		local nxt = TechConfig.GetTechLevel(techId, nextLevel)
+		if nxt then
+			table.insert(lines, ("Naechste Stufe [%s]: %s"):format(
+				TechConfig.GetLevelName(nextLevel), nxt.Desc))
+			table.insert(lines, ("Kosten: %d RP"):format(nxt.cost))
+		end
+	else
+		table.insert(lines, "Bereits auf Gold (max)")
+	end
+
+	-- If it is being researched, add the live progress.
+	local progress = state.currentProgress[techId]
+	if progress then
+		local cur = progress.current or 0
+		local max = progress.max or 0
+		if (progress.roundsLeft or -1) >= 0 then
+			table.insert(lines, ("Fortschritt: %d / %d RP (noch %d Runden)")
+				:format(cur, max, progress.roundsLeft))
+		else
+			table.insert(lines, ("Fortschritt: %d / %d RP"):format(cur, max))
+		end
+	end
+
 	return table.concat(lines, "\n")
 end
 
@@ -357,15 +418,15 @@ local function ShowTooltip(techId, button)
 	local tech = TechConfig.GetTech(techId)
 	if not tech then return end
 
-	tooltipTitle.Text = tech.Name
+	tooltipTitle.Text = TierLabel(techId, GetLevel(techId))
 	tooltipBody.Text = FormatTechEffect(techId)
 	tooltip.Visible = true
 
 	-- Place the tooltip next to the button, clamped to the screen.
 	local abs = button.AbsolutePosition
 	local screen = overlay.AbsoluteSize
-	local x = math.clamp(abs.X + 10, 10, math.max(10, screen.X - 290))
-	local y = math.clamp(abs.Y - 100, 10, math.max(10, screen.Y - 110))
+	local x = math.clamp(abs.X + 10, 10, math.max(10, screen.X - 310))
+	local y = math.clamp(abs.Y - 100, 10, math.max(10, screen.Y - 120))
 	tooltip.Position = UDim2.fromOffset(x, y)
 end
 
@@ -383,24 +444,32 @@ local function UpdateTechButtonState(techId)
 	local tech = TechConfig.GetTech(techId)
 	if not tech then return end
 
+	local level = GetLevel(techId)
 	local idx = queueIndex(techId)
 	local statusLabel = button:FindFirstChild("Status")
+	local nameLabel = button:FindFirstChild("TechName")
 	local progressFill = button:FindFirstChild("Progress")
 		and button.Progress:FindFirstChild("Fill")
 
-	if isResearched(techId) then
-		button.BackgroundColor3 = COLORS.done
-		if statusLabel then statusLabel.Text = "\u{2705} erforscht" end
+	if nameLabel then
+		nameLabel.Text = TierLabel(techId, level)
+	end
+
+	local prog = state.currentProgress[techId]
+
+	-- GOLD (max) - not clickable.
+	if isMaxed(techId) then
+		button.BackgroundColor3 = COLORS.gold
+		if statusLabel then statusLabel.Text = "Gold (max)" end
 		if progressFill then progressFill.Size = UDim2.fromScale(1, 1) end
 
+	-- IN QUEUE - the NEXT tier is being researched.
 	elseif idx then
-		-- Queued: dim it when there is no RP income at all.
 		local stalled = (state.totalRPPerRound or 0) <= 0
 		button.BackgroundColor3 = stalled and COLORS.stalled or COLORS.queued
 
-		local prog = state.currentProgress[techId]
 		local cur = prog and prog.current or 0
-		local max = prog and prog.max or tech.Cost
+		local max = prog and prog.max or TechConfig.GetLevelCost(techId, level + 1)
 		local rounds = prog and prog.roundsLeft or -1
 
 		if statusLabel then
@@ -414,35 +483,58 @@ local function UpdateTechButtonState(techId)
 			progressFill.Size = UDim2.fromScale(math.clamp(cur / math.max(1, max), 0, 1), 1)
 		end
 
-	else
-		button.BackgroundColor3 = COLORS.locked
-		local prog = state.currentProgress[techId]
+	-- TIER REACHED (bronze / silver), not queued.
+	elseif level >= 1 then
+		button.BackgroundColor3 = LevelColor(level)
+		local nextLevel = TechConfig.GetNextLevel(level)
 		if statusLabel then
 			if prog and (prog.current or 0) > 0 then
-				statusLabel.Text = ("%d RP  (%d/%d gespeichert)")
-					:format(tech.Cost, prog.current, prog.max or tech.Cost)
+				statusLabel.Text = ("%s erreicht - %d RP fuer [%s]")
+					:format(TechConfig.GetLevelName(level),
+						prog.current,
+						TechConfig.GetLevelName(nextLevel))
 			else
-				statusLabel.Text = ("%d RP"):format(tech.Cost)
+				statusLabel.Text = ("%s erreicht"):format(TechConfig.GetLevelName(level))
+			end
+		end
+		if progressFill then
+			local ratio = (prog and (prog.current or 0) > 0)
+				and math.clamp((prog.current or 0) / math.max(1, prog.max or 1), 0, 1)
+				or 1
+			progressFill.Size = UDim2.fromScale(ratio, 1)
+		end
+
+	-- NOT RESEARCHED.
+	else
+		button.BackgroundColor3 = COLORS.locked
+		if statusLabel then
+			local nextCost = TechConfig.GetLevelCost(techId, 1)
+			if prog and (prog.current or 0) > 0 then
+				statusLabel.Text = ("%d RP  (%d/%d gespeichert)")
+					:format(nextCost, prog.current, prog.max or nextCost)
+			else
+				statusLabel.Text = ("%d RP"):format(nextCost)
 			end
 		end
 		if progressFill then
 			local cur = prog and prog.current or 0
 			progressFill.Size = UDim2.fromScale(
-				math.clamp(cur / math.max(1, tech.Cost), 0, 1), 1)
+				math.clamp(cur / math.max(1, TechConfig.GetLevelCost(techId, 1)), 0, 1), 1)
 		end
 	end
 end
 
 --------------------------------------------------------------------------------
 -- UpdateCategoryBars()
+-- Progress is based on ALL tiers: 4 techs x 3 tiers = 12 possible upgrades.
 --------------------------------------------------------------------------------
 local function UpdateCategoryBars()
 	for _, entry in ipairs(TechConfig.CategoryOrder) do
 		local techs = TechConfig.GetTechsByCategory(entry.key)
-		local total = #techs
+		local total = #techs * TechConfig.MAX_LEVEL   -- 12 per category
 		local done = 0
 		for _, tech in ipairs(techs) do
-			if isResearched(tech.Id) then done += 1 end
+			done += GetLevel(tech.Id)
 		end
 
 		local fill = categoryBars[entry.key]
@@ -464,7 +556,7 @@ end
 -- OnTechClicked(techId)
 --------------------------------------------------------------------------------
 local function OnTechClicked(techId)
-	if isResearched(techId) then return end   -- green: nothing to do
+	if isMaxed(techId) then return end   -- gold: nothing to do
 
 	if queueIndex(techId) then
 		Net.Fire("TechRemoveFromQueue", techId)
@@ -515,7 +607,7 @@ local function buildTechButton(parent, tech, index)
 	nameLabel.TextColor3 = COLORS.text
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	nameLabel.Text = tech.Name
+	nameLabel.Text = TechConfig.GetTech(tech.Id) and tech.Name or tech.Name
 	nameLabel.Parent = button
 
 	local descLabel = Instance.new("TextLabel")
@@ -541,7 +633,7 @@ local function buildTechButton(parent, tech, index)
 	statusLabel.TextSize = 11
 	statusLabel.TextColor3 = COLORS.barFill
 	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-	statusLabel.Text = ("%d RP"):format(tech.Cost)
+	statusLabel.Text = ("%d RP"):format(TechConfig.GetLevelCost(tech.Id, 1))
 	statusLabel.Parent = button
 
 	local progressBg = Instance.new("Frame")
@@ -602,7 +694,7 @@ local function RenderCategoryColumns()
 		end)
 		local barFill = ensure(barBg, "Frame", "Fill", function(f)
 			f.Size = UDim2.fromScale(0, 1)
-			f.BackgroundColor3 = COLORS.done
+			f.BackgroundColor3 = COLORS.gold
 			f.BorderSizePixel = 0
 		end)
 		categoryBars[entry.key] = barFill
@@ -644,6 +736,8 @@ end
 --
 -- Queue position 1  -> ActiveTechFrame   (large, full width, progress bar)
 -- Queue position 2+ -> WaitingQueueFrame (small tiles, wrapping UIGridLayout)
+--
+-- Both show the TARGET tier (the tier currently being researched).
 --------------------------------------------------------------------------------
 local function RenderQueue()
 	totalRPLabel.Text = ("RP pro Runde: %d"):format(state.totalRPPerRound or 0)
@@ -672,15 +766,17 @@ local function RenderQueue()
 
 	activeTechFrame.BackgroundColor3 = Color3.fromRGB(32, 62, 112)
 	activeTechCategory.Text = CategoryIcon(activeTech.Category)
-	activeTechName.Text = activeTech.Name
 	activeRemoveButton.Visible = true
 
 	local prog = state.currentProgress[activeId] or {}
+	local level = prog.level or GetLevel(activeId)
+	local targetLevel = prog.targetLevel or (level + 1)
 	local cur = prog.current or 0
-	local max = prog.max or activeTech.Cost
+	local max = prog.max or TechConfig.GetLevelCost(activeId, targetLevel)
 	local rounds = prog.roundsLeft or -1
 	local ratio = math.clamp(cur / math.max(1, max), 0, 1)
 
+	activeTechName.Text = TierLabel(activeId, targetLevel)
 	activeProgressFill.Size = UDim2.fromScale(ratio, 1)
 	activeProgressText.Text = ("%d / %d RP  (%d%%)")
 		:format(cur, max, math.floor(ratio * 100))
@@ -701,8 +797,10 @@ local function RenderQueue()
 		local tech = TechConfig.GetTech(techId)
 		if tech then
 			local wProg = state.currentProgress[techId] or {}
+			local wLevel = wProg.level or GetLevel(techId)
+			local wTarget = wProg.targetLevel or (wLevel + 1)
 			local wCur = wProg.current or 0
-			local wMax = wProg.max or tech.Cost
+			local wMax = wProg.max or TechConfig.GetLevelCost(techId, wTarget)
 			local wRatio = math.clamp(wCur / math.max(1, wMax), 0, 1)
 
 			local tile = Instance.new("Frame")
@@ -740,7 +838,7 @@ local function RenderQueue()
 			icon.Text = CategoryIcon(tech.Category)
 			icon.Parent = tile
 
-			-- Tech name (two lines, truncated)
+			-- Tech name (with TARGET tier prefix)
 			local name = Instance.new("TextLabel")
 			name.Name = "QueueTechName"
 			name.Size = UDim2.new(1, -58, 0, 18)
@@ -751,7 +849,7 @@ local function RenderQueue()
 			name.TextColor3 = COLORS.text
 			name.TextXAlignment = Enum.TextXAlignment.Left
 			name.TextTruncate = Enum.TextTruncate.AtEnd
-			name.Text = tech.Name
+			name.Text = TierLabel(techId, wTarget)
 			name.Parent = tile
 
 			-- Small progress bar so partial progress stays visible
@@ -818,7 +916,7 @@ end
 local function OnTechTreeUpdate(data)
 	if not data then return end
 
-	state.researchedTechs = data.researchedTechs or {}
+	state.techLevels = data.techLevels or {}
 	state.researchQueue = data.researchQueue or {}
 	state.currentProgress = data.currentProgress or {}
 	state.totalRPPerRound = data.totalRPPerRound or 0
@@ -866,7 +964,9 @@ Net.On("TechResearched", function(data)
 	for _, techId in ipairs(data.techIds) do
 		local tech = TechConfig.GetTech(techId)
 		if tech then
-			print("[TechTreeGui] Erforscht: " .. tech.Name)
+			local level = GetLevel(techId)
+			print(("[TechTreeGui] Erforscht: [%s] %s"):format(
+				TechConfig.GetLevelName(level), tech.Name))
 		end
 	end
 end)

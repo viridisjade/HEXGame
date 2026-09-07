@@ -5,12 +5,24 @@
     Research core + the single read API every other system uses to ask
     "does this player have tech X / what is my bonus?".
 
+    TIER SYSTEM (Bronze -> Silver -> Gold)
+        Every tech has 3 tiers. A tech's level (0-3) determines which tier
+        is active. Effects are NOT cumulative: reading a tech's effect always
+        returns the value of its CURRENT tier (Silver = +20%, never +10%+10%).
+        Upgrading replaces the previous tier's effect automatically, because
+        everything is derived on demand from the level.
+
     RESEARCH FLOW (once per round, driven by CityEconomySystem)
         ProcessResearch(player)
           1. GetTotalRP(player)  - research yield of all cities (+ tech bonus)
           2. pour the RP into the FIRST queue entry
-          3. finished tech -> MarkResearched + ApplyEffect + broadcast
+          3. finished tier -> MarkResearched (level+1) + ApplyEffect + broadcast
           4. leftover RP flow into the next entry (nothing is wasted)
+        The cost of a tier is BaseCost x tier:
+            level 0 -> tier 1 (Bronze) = BaseCost x 1
+            level 1 -> tier 2 (Silver) = BaseCost x 2
+            level 2 -> tier 3 (Gold)   = BaseCost x 3
+        When a tech reaches Gold it is dropped from the queue automatically.
 
     BONUS API (read by ArmyStats / CombatSystem / MovementSystem / ...)
         HasTech(player, techId)              -> boolean
@@ -36,7 +48,7 @@ local function remote(name)
 end
 
 --------------------------------------------------------------------------------
--- HasTech(player, techId) -> boolean
+-- HasTech(player, techId) -> boolean (true when at least tier 1)
 --------------------------------------------------------------------------------
 function TechTreeSystem.HasTech(player, techId)
 	if not player then return false end
@@ -54,16 +66,17 @@ function TechTreeSystem.GetStatBonus(player, stat, unitClass)
 	local rec = TechData.Get(player)
 	if not rec then return flat, percent end
 
-	for techId in pairs(rec.researchedTechs) do
-		local tech = TechConfig.GetTech(techId)
-		local eff = tech and tech.Effect
-		if eff and eff.Type == TechConfig.EffectType.STAT_MOD and eff.Stat == stat then
-			-- A class restricted tech only counts for that unit class.
-			if (not eff.UnitClass) or eff.UnitClass == unitClass then
-				if eff.Mode == "Percent" then
-					percent += eff.Value
-				else
-					flat += eff.Value
+	for techId, level in pairs(rec.techLevels) do
+		if level >= 1 then
+			local eff = TechConfig.GetTechEffect(techId, level)
+			if eff and eff.Type == TechConfig.EffectType.STAT_MOD and eff.Stat == stat then
+				-- A class restricted tech only counts for that unit class.
+				if (not eff.UnitClass) or eff.UnitClass == unitClass then
+					if eff.Mode == "Percent" then
+						percent += eff.Value
+					else
+						flat += eff.Value
+					end
 				end
 			end
 		end
@@ -82,13 +95,14 @@ function TechTreeSystem.GetYieldMultiplier(player, yieldKey, buildingType)
 	local rec = TechData.Get(player)
 	if not rec then return multiplier end
 
-	for techId in pairs(rec.researchedTechs) do
-		local tech = TechConfig.GetTech(techId)
-		local eff = tech and tech.Effect
-		if eff and eff.Type == TechConfig.EffectType.YIELD_MOD and eff.Yield == yieldKey then
-			-- Building bound techs only apply to that building type.
-			if (not eff.BuildingType) or eff.BuildingType == buildingType then
-				multiplier += eff.Value
+	for techId, level in pairs(rec.techLevels) do
+		if level >= 1 then
+			local eff = TechConfig.GetTechEffect(techId, level)
+			if eff and eff.Type == TechConfig.EffectType.YIELD_MOD and eff.Yield == yieldKey then
+				-- Building bound techs only apply to that building type.
+				if (not eff.BuildingType) or eff.BuildingType == buildingType then
+					multiplier += eff.Value
+				end
 			end
 		end
 	end
@@ -105,11 +119,12 @@ function TechTreeSystem.GetCostMultiplier(player, target)
 	local rec = TechData.Get(player)
 	if not rec then return multiplier end
 
-	for techId in pairs(rec.researchedTechs) do
-		local tech = TechConfig.GetTech(techId)
-		local eff = tech and tech.Effect
-		if eff and eff.Type == TechConfig.EffectType.COST_MOD and eff.Target == target then
-			multiplier -= eff.Value
+	for techId, level in pairs(rec.techLevels) do
+		if level >= 1 then
+			local eff = TechConfig.GetTechEffect(techId, level)
+			if eff and eff.Type == TechConfig.EffectType.COST_MOD and eff.Target == target then
+				multiplier -= eff.Value
+			end
 		end
 	end
 	return math.max(0.1, multiplier)  -- never free
@@ -127,11 +142,12 @@ function TechTreeSystem.GetSpecial(player, key)
 	if not rec then return 0 end
 
 	local total = 0
-	for techId in pairs(rec.researchedTechs) do
-		local tech = TechConfig.GetTech(techId)
-		local eff = tech and tech.Effect
-		if eff and eff.Type == TechConfig.EffectType.SPECIAL and eff.Key == key then
-			total += eff.Value
+	for techId, level in pairs(rec.techLevels) do
+		if level >= 1 then
+			local eff = TechConfig.GetTechEffect(techId, level)
+			if eff and eff.Type == TechConfig.EffectType.SPECIAL and eff.Key == key then
+				total += eff.Value
+			end
 		end
 	end
 	return total
@@ -147,14 +163,15 @@ function TechTreeSystem.GetMovementBonus(player, unitClass, ownTerritory)
 	local rec = TechData.Get(player)
 	if not rec then return bonus end
 
-	for techId in pairs(rec.researchedTechs) do
-		local tech = TechConfig.GetTech(techId)
-		local eff = tech and tech.Effect
-		if eff and eff.Type == TechConfig.EffectType.MOVEMENT_MOD then
-			local classOk = (not eff.UnitClass) or eff.UnitClass == unitClass
-			local terrainOk = (not eff.OwnTerritoryOnly) or ownTerritory == true
-			if classOk and terrainOk then
-				bonus += eff.Value
+	for techId, level in pairs(rec.techLevels) do
+		if level >= 1 then
+			local eff = TechConfig.GetTechEffect(techId, level)
+			if eff and eff.Type == TechConfig.EffectType.MOVEMENT_MOD then
+				local classOk = (not eff.UnitClass) or eff.UnitClass == unitClass
+				local terrainOk = (not eff.OwnTerritoryOnly) or ownTerritory == true
+				if classOk and terrainOk then
+					bonus += eff.Value
+				end
 			end
 		end
 	end
@@ -189,7 +206,7 @@ function TechTreeSystem.GetTotalRP(player)
 		end
 	end
 
-	-- AdvancedResearch: +50% on the whole research output.
+	-- AdvancedResearch: up to +75% on the whole research output.
 	total = total * TechTreeSystem.GetYieldMultiplier(player, "research", nil)
 	return math.floor(total)
 end
@@ -198,8 +215,10 @@ end
 -- ApplyEffect / RemoveEffect
 --
 -- All effects are read on demand through the bonus API above, so "applying"
--- an effect only means: remember it as researched and refresh the caches that
--- hold derived values (army stats).
+-- an effect only means: remember the new tier and refresh the caches that
+-- hold derived values (army stats). The previous tier's effect is replaced
+-- automatically because GetTechEffect(techId, level) now returns the value
+-- of the CURRENT tier.
 --------------------------------------------------------------------------------
 function TechTreeSystem.ApplyEffect(player, techId)
 	local tech = TechConfig.GetTech(techId)
@@ -219,8 +238,11 @@ function TechTreeSystem.ApplyEffect(player, techId)
 		end
 	end
 
-	print(("[TechTree] %s hat '%s' erforscht"):format(
-		player and player.Name or "?", tech.Name))
+	local level = TechData.GetLevel(player, techId)
+	print(("[TechTree] %s hat '%s' (Stufe %d / %s) erforscht"):format(
+		player and player.Name or "?", tech.Name, level,
+		TechConfig.GetLevelName(level) or "Gold"))
+
 	return true
 end
 
@@ -280,7 +302,8 @@ end
 
 --------------------------------------------------------------------------------
 -- ProcessResearch(player) -> finishedTechIds
--- One round of research. Overflow RP roll into the next queue entry.
+-- One round of research. Costs depend on the TARGET tier of each tech.
+-- Overflow RP roll into the next queue entry.
 --------------------------------------------------------------------------------
 function TechTreeSystem.ProcessResearch(player)
 	if not player then return {} end
@@ -306,18 +329,27 @@ function TechTreeSystem.ProcessResearch(player)
 			if not tech then
 				table.remove(rec.researchQueue, 1)
 			else
-				local current = rec.currentProgress[techId] or 0
-				local needed = math.max(0, tech.Cost - current)
-
-				if remaining >= needed then
-					-- Tech finished, the rest flows into the next entry.
-					remaining -= needed
-					TechData.MarkResearched(player, techId)
-					TechTreeSystem.ApplyEffect(player, techId)
-					table.insert(finished, techId)
+				local level = rec.techLevels[techId] or 0
+				local targetLevel = level + 1
+				-- Gold techs cannot be queued (AddToQueue blocks it), but guard
+				-- against leftover maxed entries anyway.
+				if targetLevel > TechConfig.MAX_LEVEL then
+					table.remove(rec.researchQueue, 1)
 				else
-					rec.currentProgress[techId] = current + remaining
-					remaining = 0
+					local current = rec.currentProgress[techId] or 0
+					local cost = TechConfig.GetLevelCost(techId, targetLevel)
+					local needed = math.max(0, cost - current)
+
+					if remaining >= needed then
+						-- Tier finished, the rest flows into the next entry.
+						remaining -= needed
+						TechData.MarkResearched(player, techId)
+						TechTreeSystem.ApplyEffect(player, techId)
+						table.insert(finished, techId)
+					else
+						rec.currentProgress[techId] = current + remaining
+						remaining = 0
+					end
 				end
 			end
 		end
