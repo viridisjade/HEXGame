@@ -79,6 +79,7 @@
       "TechTreeGui": {
         "$className": "ScreenGui",
         "$properties": {
+          "Enabled": false,
           "ZIndexBehavior": "Sibling"
         },
         "$path": "src/StarterGui/TechTreeGui"
