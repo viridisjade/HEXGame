@@ -9,6 +9,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ClientState = require(ReplicatedStorage:WaitForChild("ClientState"))
+
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes")
 local getEmpireData = dataRemotes:FindFirstChild("GetEmpireData")
 
@@ -22,44 +24,73 @@ local campLabel = empireFrame:FindFirstChild("PlayerCampCountLable")
 local cityLabel = empireFrame:FindFirstChild("PlayerCityCountLable")
 
 --------------------------------------------------------------------------------
--- TECH TREE: the research button toggles the TechTreeGui.
--- Communication runs through the 'ToggleTechTree' BindableEvent in
--- ReplicatedStorage - the same decoupling pattern used by HexRightClick
--- and OpenCombatView. This keeps the two GUIs free of requires.
---------------------------------------------------------------------------------
 -- DIPLOMATIE: der Diplomatie-Button togglet das Diplomatie-Fenster.
--- Der Button existiert nocht nicht in der EmpireFrame.rbxm, daher wird er zur
--- Laufzeit erzeugt (neben dem Research-Button), falls er fehlt.
-local ClientState = require(ReplicatedStorage:WaitForChild("ClientState"))
+-- Der Button existiert nicht in der EmpireFrame.rbxm, daher wird er zur Laufzeit
+-- erzeugt (neben dem Research-Button), falls er nicht gefunden wird.
+--------------------------------------------------------------------------------
 local diplomacyButton = empireFrame:FindFirstChild("DiplomacyOverlayButton")
+
 if not diplomacyButton then
 	local researchBtn = empireFrame:FindFirstChild("ResearchOverlayButton")
 	local newBtn = Instance.new("TextButton")
 	newBtn.Name = "DiplomacyOverlayButton"
-	newBtn.Size = researchBtn and researchBtn.Size or UDim2.fromOffset(140, 36)
-	newBtn.Position = researchBtn
-		and UDim2.new(researchBtn.Position.X.Scale, researchBtn.Position.X.Offset + researchBtn.Size.X.Offset + 8, researchBtn.Position.Y.Scale, researchBtn.Position.Y.Offset)
-		or UDim2.new(1, -150, 0, 14)
+
+	if researchBtn then
+		-- Neben dem Research-Button: rechte Kante + Abstand.
+		newBtn.Size = researchBtn.Size
+		newBtn.Position = UDim2.new(
+			researchBtn.Position.X.Scale,
+			researchBtn.Position.X.Offset + researchBtn.Size.X.Offset + 8,
+			researchBtn.Position.Y.Scale,
+			researchBtn.Position.Y.Offset
+		)
+	else
+		newBtn.Size = UDim2.fromOffset(140, 36)
+		newBtn.Position = UDim2.new(1, -150, 0, 14)
+	end
+
 	newBtn.BackgroundColor3 = Color3.fromRGB(45, 90, 160)
 	newBtn.BorderSizePixel = 0
 	newBtn.Font = Enum.Font.GothamBold
 	newBtn.TextSize = 14
 	newBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 	newBtn.Text = "🤝 Diplomatie"
-	newBtn.Parent = empireFrame
+
+	-- Sicherstellen, dass der Button Klicks empfangen kann.
+	newBtn.Active = true
+	newBtn.AutoButtonColor = true
+	newBtn.Interactable = true
+
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 6)
 	corner.Parent = newBtn
+
+	newBtn.Parent = empireFrame
 	diplomacyButton = newBtn
 	print("[EmpireOverlay] DiplomacyOverlayButton erzeugt (fehlte in EmpireFrame.rbxm)")
 end
+
+-- Falls der gefundene Button nicht klickbar war, reparieren.
+diplomacyButton.Active = true
+diplomacyButton.AutoButtonColor = true
+diplomacyButton.Interactable = true
+
+-- Eigentlicher Toggle (oeffnen/schliessen). Läuft ueber das ClientState-
+-- BindableEvent 'ToggleDiplomacy', das auch der DiplomacyGuiController hoert.
 diplomacyButton.Activated:Connect(function()
 	ClientState.FireToggleDiplomacy()
 end)
 print("[EmpireOverlay] DiplomacyOverlayButton mit DiplomatieGui verbunden")
 
+--------------------------------------------------------------------------------
+-- TECH TREE: der Research-Button togglet das TechTreeGui.
+--------------------------------------------------------------------------------
 local researchButton = empireFrame:FindFirstChild("ResearchOverlayButton")
 if researchButton then
+	researchButton.Active = true
+	researchButton.AutoButtonColor = true
+	researchButton.Interactable = true
+
 	local toggleTechTree = ReplicatedStorage:FindFirstChild("ToggleTechTree")
 		or ReplicatedStorage:WaitForChild("ToggleTechTree", 10)
 	if toggleTechTree then

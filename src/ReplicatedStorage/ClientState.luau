@@ -12,6 +12,8 @@
 
 local ClientState = {}
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 ClientState.Kind = { ARMY = "army", CAMP = "camp", CITY = "city" }
 
 local selKind, selId = nil, nil
@@ -193,8 +195,14 @@ function ClientState.GetDiplomacyOffers()
 	return diplomacyOffers
 end
 
--- BindableEvent zum Oeffnen/Schliessen des Diplomatie-Fensters
+-- BindableEvent zum Oeffnen/Schliessen des Diplomatie-Fensters.
+-- Wird wie das funktionierende 'ToggleTechTree' in ReplicatedStorage geparented,
+-- damit der Empfaenger (DiplomacyGuiController) und der Sender
+-- (EmpireOverlayController) garantiert dasselbe Event teilen - auch wenn der
+-- Sender vor dem Empfaenger laeuft.
 local diplomacyToggle = Instance.new("BindableEvent")
+diplomacyToggle.Name = "ToggleDiplomacy"
+diplomacyToggle.Parent = ReplicatedStorage
 ClientState.ToggleDiplomacy = diplomacyToggle.Event
 function ClientState.FireToggleDiplomacy()
 	diplomacyToggle:Fire()
