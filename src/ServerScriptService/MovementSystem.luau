@@ -21,6 +21,7 @@ local ArmyModelMover = require(script.Parent:WaitForChild("ArmyModelMover"))
 local CombatSystem = require(script.Parent:WaitForChild("CombatSystem"))
 local CombatData = require(script.Parent:WaitForChild("CombatData"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 -- Lazy tech access (avoids require cycles).
 local _techSystem
@@ -308,6 +309,9 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 				end
 			end
 
+			-- Fog of War: Sicht des Besitzers aktualisieren (Armee steht neu).
+			pcall(FogOfWarSystem.UpdateVision, army.owner)
+
 			ArmyStats.SpendMovement(armyId, spentCost)
 			MovementOrderData.CompleteOrder(armyId)
 
@@ -345,6 +349,9 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 
 	-- Model visuell bewegen (animiert) – ebenfalls mit ABSOLUTEN Indizes
 	ArmyModelMover.MoveModelAlongPath(armyId, path, startStep, endStep)
+
+	-- Fog of War: Sicht des Besitzers aktualisieren (Armee hat sich bewegt).
+	pcall(FogOfWarSystem.UpdateVision, army.owner)
 
 	-- OrderData aktualisieren (ABSOLUTER Fortschritt)
 	local order = MovementOrderData.GetOrder(armyId)

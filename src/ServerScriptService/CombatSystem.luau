@@ -52,6 +52,7 @@ local ArmyModelMover = require(script.Parent:WaitForChild("ArmyModelMover"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
 local CityData = require(script.Parent:WaitForChild("CityData"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 -- Combat rule (was UnitConfig.MAX_DEFENSE_PERCENT): absorption is capped at 70%.
 local MAX_DEFENSE_PERCENT = 70
@@ -1197,6 +1198,11 @@ function CombatSystem.EndCombat(combat, winnerSide, byFlight)
 	if ArmyData.GetArmy(winnerArmyId) then
 		ArmySpawner.RefreshArmyModel(winnerArmyId)
 	end
+
+	-- Fog of War: Nach einem Kampf koennen Units gestorben sein -> Sicht beider
+	-- Beteiligten neu berechnen (weniger Sicht, Gebaeude bleiben als Quelle).
+	if combat.attackerOwner then pcall(FogOfWarSystem.UpdateVision, combat.attackerOwner) end
+	if combat.defenderOwner then pcall(FogOfWarSystem.UpdateVision, combat.defenderOwner) end
 
 	print(("[CombatSystem] Kampf %d beendet - Sieger: %s%s")
 		:format(combat.id, tostring(winnerSide), byFlight and " (Flucht)" or ""))

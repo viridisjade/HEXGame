@@ -200,7 +200,39 @@ function HexSpawner.spawnMap(map)
 	end
 	print("[HexSpawner] Dauer: " .. elapsed .. " Sekunden")
 
+	-- Fog of War: alles standardmaessig unsichtbar ("nicht erkundet").
+	-- Sichtbare/erkundete Felder blendet der Client per FogOfWarInit ein.
+	HexSpawner.hideAllHexes()
+	print("[HexSpawner] Alle Hex-Modelle auf unsichtbar gesetzt (Fog of War).")
+
 	return count
+end
+
+--------------------------------------------------------------------------------
+-- hideAllHexes()
+-- Setzt alle gespawnten Hex-Modelle (Terrain, Soil, Gebäude, Province-Visuals,
+-- Armee-Modelle) auf Visible = false. Der Client blendet erkundete/sichtbare
+-- Felder ueber FogOfWarInit/FogOfWarUpdate wieder ein.
+--------------------------------------------------------------------------------
+function HexSpawner.hideAllHexes()
+	local hexMap = workspace:FindFirstChild("HexMap")
+	if not hexMap then return end
+
+	local function hideObject(obj)
+		if not obj then return end
+		for _, part in ipairs(obj:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Visible = false
+			end
+		end
+		if obj:IsA("BasePart") then
+			obj.Visible = false
+		end
+	end
+
+	for _, child in ipairs(hexMap:GetChildren()) do
+		hideObject(child)
+	end
 end
 
 --------------------------------------------------------------------------------

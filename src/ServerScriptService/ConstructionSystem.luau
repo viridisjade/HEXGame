@@ -22,6 +22,7 @@ local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
 
 local UnitSpawner = require(script.Parent:WaitForChild("UnitSpawner"))
 local CombatData = require(script.Parent:WaitForChild("CombatData"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 -- Lazy tech access (avoids require cycles).
 local _techSystem
@@ -341,6 +342,8 @@ function ConstructionSystem.ProcessAllConstruction()
 				if spawned then
 					print("[ConstructionSystem] Wartende Unit konnte gespawnt werden: " .. order.unitType)
 					CityData.CompleteActiveBuildOrder(cityId)
+					-- Fog of War: neue Unit erweitert die Sicht des Besitzers.
+					pcall(FogOfWarSystem.UpdateVision, city.owner)
 				end
 			end
 
@@ -350,6 +353,8 @@ function ConstructionSystem.ProcessAllConstruction()
 					if spawned then
 						print("[ConstructionSystem] Unit erfolgreich gespawnt: " .. order.unitType)
 						CityData.CompleteActiveBuildOrder(cityId)
+						-- Fog of War: neue Unit erweitert die Sicht des Besitzers.
+						pcall(FogOfWarSystem.UpdateVision, city.owner)
 					else
 						print("[ConstructionSystem] Unit " .. order.unitType .. " wartet auf Spawn: " .. tostring(spawnState))
 						order.status = "WaitingSpawn"
@@ -397,6 +402,9 @@ function ConstructionSystem.ProcessAllConstruction()
 
 						CityData.CompleteActiveBuildOrder(cityId)
 						print("[ConstructionSystem] Gebäude fertiggestellt: " .. order.buildingType)
+
+						-- Fog of War: neues Gebäude (Camp/City/Bastion) ist Sichtquelle.
+						pcall(FogOfWarSystem.UpdateVision, city.owner)
 
 						if _G.NotifyCityStatsChanged then
 							_G.NotifyCityStatsChanged(cityId)

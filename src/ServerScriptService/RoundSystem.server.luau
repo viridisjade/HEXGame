@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ArmyStats = require(script.Parent:WaitForChild("ArmyStats"))
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 -- NOTE: combats no longer tick with the game round. They run asynchronously
 -- and are driven by CombatSystem's own turn timers (see CombatSystem.StartTurn).
 
@@ -176,6 +177,12 @@ local function startRound()
 	CityEconomySystem.ProcessAllCities()
 
 	ConstructionSystem.ProcessAllConstruction()
+
+	-- Fog of War: Beim Rundenstart die Sicht aller Spieler auffrischen
+	-- (Bewegung/Bau/Kampf koennen Sichtquellen veraendert haben).
+	for _, player in ipairs(Players:GetPlayers()) do
+		pcall(FogOfWarSystem.UpdateVision, player)
+	end
 
 	print("[RoundSystem] === Runde " .. currentRound .. " gestartet (" .. CONFIG.ROUND_DURATION .. "s) ===")
 	broadcastRoundStart()
