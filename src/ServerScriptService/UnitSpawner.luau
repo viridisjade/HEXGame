@@ -13,6 +13,7 @@ local ArmyData = require(script.Parent:WaitForChild("ArmyData"))
 local ArmySystem = require(script.Parent:WaitForChild("ArmySystem"))
 local ArmySpawner = require(script.Parent:WaitForChild("ArmySpawner"))
 local UnitData = require(script.Parent:WaitForChild("UnitData"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 function UnitSpawner.CanSpawn(owner, q, r)
 	local hex = HexData.GetHex(q, r)
@@ -68,6 +69,11 @@ function UnitSpawner.Spawn(owner, unitType, q, r)
 		print("[UnitSpawner] ERFOLG: Army " .. tostring(armyId) .. " erstellt. Owner in DB: " .. tostring(checkArmy.owner and checkArmy.owner.Name or "FEHLT"))
 	else
 		print("[UnitSpawner] WARNUNG: Army ID " .. tostring(armyId) .. " wurde nicht in ArmyData gefunden!")
+	end
+
+	-- Fog of War: Neue Unit erweitert die Sicht des Besitzers sofort.
+	if owner then
+		pcall(FogOfWarSystem.UpdateVision, owner)
 	end
 
 	return true, {

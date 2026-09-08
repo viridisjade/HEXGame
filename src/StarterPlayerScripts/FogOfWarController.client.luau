@@ -122,7 +122,16 @@ end
 
 local function findProvinceModel(q, r)
 	if not provinceFolder then return nil end
-	return provinceFolder:FindFirstChild("Hex_" .. q .. "_" .. r)
+	local name = "Hex_" .. q .. "_" .. r
+	-- Provinz-Hexes liegen gruppiert unter Province_<id> Modellen, NICHT direkt
+	-- im ProvinceVisuals-Ordner. Suche deshalb in jedem Province_-Modell.
+	for _, provinceModel in ipairs(provinceFolder:GetChildren()) do
+		if provinceModel:IsA("Model") or provinceModel:IsA("Folder") then
+			local hex = provinceModel:FindFirstChild(name)
+			if hex then return hex end
+		end
+	end
+	return nil
 end
 
 local function findArmiesOnHex(q, r)
@@ -232,6 +241,65 @@ local function refreshArmies()
 end
 
 --------------------------------------------------------------------------------
+-- NEU AUFTAUCHENDE MODELLE (Gebäude, Armeen) NACHBEWERTEN
+--------------------------------------------------------------------------------
+-- Neue Modelle (z.B. von Gegnern gebaute Gebäude) werden vom Server auf allen
+-- Clients sichtbar erzeugt. Wenn ihr Hex keinen Zustandswechsel auslöst (weil es
+-- schon erkundet/sichtbar war), bleibt das neue Modell sonst fälschlich sichtbar.
+-- Hiermit wenden wir den Hex-Zustand sofort an.
+local function buildingKeyFromName(name)
+	if not name then return nil end
+	local q, r = string.match(name, "_(%-?%d+)_(%-?%d+)$")
+	if q and r then return q .. "_" .. r end
+	return nil
+end
+
+local function applyHexByKey(key)
+	if not key then return end
+	local state = stateByKey[key] or FogOfWarConfig.STATE.UNEXPLORED
+	setHexState(key, state)
+end
+
+local function connectBuildingsWatcher(buildingFolder)
+	if not buildingFolder then return end
+	buildingFolder.ChildAdded:Connect(function(child)
+		if not child then return end
+		-- Baustellen (Ghost_) sollen mit dem Fog behandelt werden; aber wir
+		-- ignorieren sie hier, weil sie beim Fertigstellen ersetzt werden.
+		if child.Name:match("^Ghost_") then return end
+		local key = buildingKeyFromName(child.Name)
+		if key then
+			applyHexByKey(key)
+		end
+	end)
+end
+
+local function connectArmyWatcher(armyFolder)
+	if not armyFolder then return end
+	armyFolder.ChildAdded:Connect(function(child)
+		if child then pcall(refreshArmies) end
+	end)
+end
+
+local function setupHexMapWatchers()
+	refreshFolders()
+	if not hexMapFolder then return end
+
+	-- Bestehende Folder (falls schon vorhanden) direkt verbinden.
+	connectBuildingsWatcher(hexMapFolder:FindFirstChild("Buildings"))
+	connectArmyWatcher(hexMapFolder:FindFirstChild("ArmyModels"))
+
+	-- Falls die Folder erst nach dem Map-Spawn (lazy) angelegt werden.
+	hexMapFolder.ChildAdded:Connect(function(child)
+		if child.Name == "Buildings" and child:IsA("Folder") then
+			connectBuildingsWatcher(child)
+		elseif child.Name == "ArmyModels" and child:IsA("Folder") then
+			connectArmyWatcher(child)
+		end
+	end)
+end
+
+--------------------------------------------------------------------------------
 -- PUBLIC NAME / READY (vorab deklariert, damit applyFullVision darauf zugreifen kann)
 --------------------------------------------------------------------------------
 local FogOfWarController = { Ready = false }
@@ -305,7 +373,8 @@ task.spawn(function()
 		task.wait(0.5)
 	end
 	hideEverything()
-	print("[FogOfWarController] Alle Hexes initial versteckt.")
+	setupHexMapWatchers()
+	print("[FogOfWarController] Alle Hexes initial versteckt, Watcher verbunden.")
 end)
 
 --------------------------------------------------------------------------------
@@ -329,6 +398,7 @@ workspace.ChildAdded:Connect(function(child)
 		task.wait(1)
 		hideEverything()
 		stateByKey = {}
+		setupHexMapWatchers()
 		print("[FogOfWarController] HexMap neu erstellt - alles wieder versteckt.")
 	end
 end)

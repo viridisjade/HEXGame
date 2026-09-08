@@ -21,6 +21,7 @@ local CityData = require(script.Parent:WaitForChild("CityData"))
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
 local CitySystem = require(script.Parent:WaitForChild("CitySystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -137,6 +138,8 @@ onEvent("RequestFoundCity", function(player, campId)
 
 	if cityId then
 		print("[CityActions] City gegründet (ID: " .. cityId .. ") von " .. player.Name)
+		-- Fog of War: Eine neue Stadt ist eine Sichtquelle (CITY_SIGHT).
+		pcall(FogOfWarSystem.UpdateVision, player)
 	else
 		warn("[CityActions] City-Gründung fehlgeschlagen: " .. tostring(reason))
 	end

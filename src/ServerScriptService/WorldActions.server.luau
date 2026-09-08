@@ -22,6 +22,7 @@ local ArmyData = require(script.Parent:WaitForChild("ArmyData"))
 local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
 local ArmySpawner = require(script.Parent:WaitForChild("ArmySpawner"))
 local BuildingSystem = require(script.Parent:WaitForChild("BuildingSystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -95,6 +96,8 @@ onEvent("RequestSpawnUnit", function(player, unitType, q, r)
 
 	if armyId and unitId then
 		print("[WorldActions] Unit '" .. tostring(unitType) .. "' gespawnt (Army " .. armyId .. ")")
+		-- Fog of War: neue Unit erweitert die Sicht des Besitzers.
+		pcall(FogOfWarSystem.UpdateVision, player)
 	else
 		warn("[WorldActions] Spawn fehlgeschlagen: '" .. tostring(unitType)
 			.. "' auf (" .. tostring(q) .. ", " .. tostring(r) .. ")")
@@ -123,6 +126,8 @@ onEvent("RequestBuildCamp", function(player, armyId)
 
 	if buildingId then
 		print("[WorldActions] Camp gebaut (ID: " .. buildingId .. ") von " .. player.Name)
+		-- Fog of War: ein Camp ist eine Sichtquelle (CAMP_SIGHT).
+		pcall(FogOfWarSystem.UpdateVision, player)
 	else
 		warn("[WorldActions] Camp-Bau fehlgeschlagen: " .. tostring(reason))
 	end
