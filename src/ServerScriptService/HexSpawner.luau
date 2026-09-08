@@ -220,13 +220,21 @@ function HexSpawner.hideAllHexes()
 
 	local function hideObject(obj)
 		if not obj then return end
+		-- WICHTIG: BaseParts haben KEIN Visible-Property! Unsichtbar bedeutet
+		-- hier Transparency = 1 (komplett transparent).
 		for _, part in ipairs(obj:GetDescendants()) do
 			if part:IsA("BasePart") then
-				part.Visible = false
+				part.Transparency = 1
+				-- Decals/Texturen ebenfalls ausblenden.
+				for _, dec in ipairs(part:GetDescendants()) do
+					if dec:IsA("Decal") or dec:IsA("Texture") then
+						dec.Transparency = 1
+					end
+				end
 			end
 		end
 		if obj:IsA("BasePart") then
-			obj.Visible = false
+			obj.Transparency = 1
 		end
 	end
 

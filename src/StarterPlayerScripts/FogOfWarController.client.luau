@@ -61,26 +61,38 @@ local function refreshFolders()
 end
 
 --------------------------------------------------------------------------------
--- SET MODEL VISIBILITY
+-- SET MODEL VISIBILITY (nur Transferenz - BaseParts haben KEIN Visible!)
 --------------------------------------------------------------------------------
+-- Roblox-BaseParts (Part, MeshPart, Union, WedgePen) besitzen KEIN Visible-
+-- Property. Sichtbarkeit wird ausschliesslich über Transparency gesteuert:
+--   0 = sichtbar / normal, 0.5 = erkundet, 1 = komplett unsichtbar.
+-- Auch Models haben KEIN Visible - die Sichtbarkeit ergibt sich aus der
+-- Transparenz ihrer BasePart-Descendants.
 local function setModelVisibility(model, visible, transparency)
 	if not model then return end
-	local desiredTransparency = transparency or 0
+	-- visible=true -> gewuenschte Transparenz (Default 0 = sichtbar);
+	-- visible=false -> 1 (komplett unsichtbar).
+	local target = visible and (transparency or 0) or 1
 
-	-- BasePart-Descendants.
-	for _, part in ipairs(model:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.Visible = visible
-			part.Transparency = desiredTransparency
-		elseif part:IsA("Decal") or part:IsA("Texture") then
-			part.Transparency = desiredTransparency
+	-- Falls das Objekt selbst ein BasePart ist (z.B. einzelnes Hex).
+	if model:IsA("BasePart") then
+		model.Transparency = target
+		-- Decals/Texturen am Part ebenfalls mitziehen.
+		for _, child in ipairs(model:GetDescendants()) do
+			if child:IsA("Decal") or child:IsA("Texture") then
+				child.Transparency = target
+			end
 		end
+		return
 	end
 
-	-- Falls das Modell selbst ein BasePart ist.
-	if model:IsA("BasePart") then
-		model.Visible = visible
-		model.Transparency = desiredTransparency
+	-- Für Models: alle BaseParts + Decals/Texturen.
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Transparency = target
+		elseif part:IsA("Decal") or part:IsA("Texture") then
+			part.Transparency = target
+		end
 	end
 end
 
@@ -333,7 +345,6 @@ _G.FogOfWarDebugReveal = function()
 	end
 	for _, folder in ipairs(hexMap:GetDescendants()) do
 		if folder:IsA("BasePart") then
-			folder.Visible = true
 			folder.Transparency = 0
 		end
 	end
