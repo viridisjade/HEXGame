@@ -62,6 +62,46 @@ function MovementSystem.CanEnterHex(q, r)
 end
 
 --------------------------------------------------------------------------------
+-- GetTerrainHeight(terrainType) -> number
+--------------------------------------------------------------------------------
+-- Mappt den Terrain-String (siehe HexData.terrain, gesetzt aus
+-- TerrainGenerator.TerrainNames) auf ein Hoehenlevel:
+--   Water           -> 0  (Referenz, unbetretbar)
+--   Ebene1          -> 1
+--   Ebene2          -> 2
+--   Ebene3_Gebirge  -> 3
+--   Ebene4_Bergspitze -> 4
+--------------------------------------------------------------------------------
+local TERRAIN_HEIGHTS = {
+	Water = 0,
+	Ebene1 = 1,
+	Ebene2 = 2,
+	Ebene3_Gebirge = 3,
+	Ebene4_Bergspitze = 4,
+	Ebene0 = 0,
+	Unknown = 0,
+}
+
+function MovementSystem.GetTerrainHeight(terrainType)
+	return TERRAIN_HEIGHTS[terrainType] or 0
+end
+
+--------------------------------------------------------------------------------
+-- GetHeightMoveCost(baseCost, currentHeight, neighborHeight) -> number
+--------------------------------------------------------------------------------
+-- Gleiche Ebene: normale Kosten; +1/-1 Ebene: x1.5 (anstrengender).
+--------------------------------------------------------------------------------
+local HEIGHT_STEP_COST_MULT = 1.5
+
+function MovementSystem.GetHeightMoveCost(baseCost, currentHeight, neighborHeight)
+	if not baseCost then return nil end
+	if currentHeight == neighborHeight then
+		return baseCost
+	end
+	return baseCost * HEIGHT_STEP_COST_MULT
+end
+
+--------------------------------------------------------------------------------
 -- CalculatePath(startQ, startR, targetQ, targetR) -> path, totalCost
 --------------------------------------------------------------------------------
 function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
@@ -72,6 +112,10 @@ function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
 	local startKey = HexUtils.coordToKey(startQ, startR)
 	local targetKey = HexUtils.coordToKey(targetQ, targetR)
 
+	-- Hoehe des Start-Hexes (fuer den Hoehen-Check der ersten Bewegung).
+	local startHex = HexData.GetHex(startQ, startR)
+	local startHeight = startHex and MovementSystem.GetTerrainHeight(startHex.terrain) or 0
+
 	local openSet = {}
 	local cameFrom = {}
 	local gScore = {}
@@ -80,7 +124,7 @@ function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
 
 	gScore[startKey] = 0
 	fScore[startKey] = HexUtils.getDistance(startQ, startR, targetQ, targetR)
-	table.insert(openSet, { key = startKey, q = startQ, r = startR })
+	table.insert(openSet, { key = startKey, q = startQ, r = startR, height = startHeight })
 	inOpenSet[startKey] = true
 
 	while #openSet > 0 do
@@ -121,16 +165,24 @@ function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
 			local moveCost = MovementSystem.GetMovementCost(n.q, n.r)
 
 			if moveCost then
-				local tentativeG = (gScore[current.key] or math.huge) + moveCost
+				-- HOEHEN-CHECK: nur max. 1 Stufe Differenz pro Schritt erlaubt.
+				local neighborHex = HexData.GetHex(n.q, n.r)
+				local neighborHeight = neighborHex and MovementSystem.GetTerrainHeight(neighborHex.terrain) or 0
+				local heightDiff = math.abs(neighborHeight - (current.height or startHeight))
 
-				if tentativeG < (gScore[nKey] or math.huge) then
-					cameFrom[nKey] = current.key
-					gScore[nKey] = tentativeG
-					fScore[nKey] = tentativeG + HexUtils.getDistance(n.q, n.r, targetQ, targetR)
+				if heightDiff <= 1 then
+					local adjustedCost = MovementSystem.GetHeightMoveCost(moveCost, current.height or startHeight, neighborHeight)
+					local tentativeG = (gScore[current.key] or math.huge) + adjustedCost
 
-					if not inOpenSet[nKey] then
-						table.insert(openSet, { key = nKey, q = n.q, r = n.r })
-						inOpenSet[nKey] = true
+					if tentativeG < (gScore[nKey] or math.huge) then
+						cameFrom[nKey] = current.key
+						gScore[nKey] = tentativeG
+						fScore[nKey] = tentativeG + HexUtils.getDistance(n.q, n.r, targetQ, targetR)
+
+						if not inOpenSet[nKey] then
+							table.insert(openSet, { key = nKey, q = n.q, r = n.r, height = neighborHeight })
+							inOpenSet[nKey] = true
+						end
 					end
 				end
 			end
