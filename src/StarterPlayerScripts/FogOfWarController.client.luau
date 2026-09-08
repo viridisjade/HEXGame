@@ -25,6 +25,10 @@ local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local HexGridConfig = require(ReplicatedStorage:WaitForChild("HexGridConfig"))
 local FogOfWarConfig = require(ReplicatedStorage:WaitForChild("FogOfWarConfig"))
 
+-- Lebenszeichen: Wenn dieser Print NICHT erscheint, lädt das LocalScript nicht
+-- (dann liegt es an der Rojo-Zuordnung, nicht an der Fog-Logik).
+print("[FogOfWarController] geladen (LocalScript läuft)")
+
 --------------------------------------------------------------------------------
 -- STATE + CACHES
 --------------------------------------------------------------------------------
@@ -171,6 +175,13 @@ local function setHexState(key, state)
 	local provinceModel = findProvinceModel(q, r)
 	local armies = findArmiesOnHex(q, r)
 
+	-- Diagnose beim EINBLENDEN (visible): zeigt ob die Modelle gefunden werden.
+	if state == FogOfWarConfig.STATE.VISIBLE then
+		print(("[FogOfWar] setHex %s -> visible | hex=%s soil=%s bld=%s prov=%s armies=%d")
+			:format(key, tostring(hexModel ~= nil), tostring(soilModel ~= nil),
+				tostring(building ~= nil), tostring(provinceModel ~= nil), #armies))
+	end
+
 	if state == "visible" then
 		setModelVisibility(hexModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
 		setModelVisibility(soilModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
@@ -309,6 +320,27 @@ function FogOfWarController.MarkReady()
 end
 
 --------------------------------------------------------------------------------
+-- DIAGNOSE HILFE (per Hand aufrufen, NICHT im Normalbetrieb)
+--------------------------------------------------------------------------------
+-- Wenn die Pipeline NICHT das Problem ist, kann man mit diesem Aufruf ALLE
+-- Hex-Modelle sichtbar machen, um die Workspace-Struktur zu pruefen.
+-- Aufruf im Command-Bar beim Testen:  FogOfWarDebugReveal()
+_G.FogOfWarDebugReveal = function()
+	local hexMap = workspace:FindFirstChild("HexMap")
+	if not hexMap then
+		warn("[FogOfWar TEST] HexMap nicht gefunden")
+		return
+	end
+	for _, folder in ipairs(hexMap:GetDescendants()) do
+		if folder:IsA("BasePart") then
+			folder.Visible = true
+			folder.Transparency = 0
+		end
+	end
+	print("[FogOfWar TEST] Alle Hexes sichtbar gemacht!")
+end
+
+--------------------------------------------------------------------------------
 -- HIDE ALLES (Initialzustand beim Start - "nichts generiert")
 --------------------------------------------------------------------------------
 local function hideEverything()
@@ -382,11 +414,15 @@ end)
 --------------------------------------------------------------------------------
 Net.On("FogOfWarInit", function(data)
 	if not data then return end
+	print(("[FogOfWar Client] INIT empfangen | visible=%d explored=%d")
+		:format(#(data.visible or {}), #(data.explored or {})))
 	task.spawn(function() applyFullVision(data) end)
 end)
 
 Net.On("FogOfWarUpdate", function(data)
 	if not data then return end
+	print(("[FogOfWar Client] UPDATE empfangen | neu=%d hidden=%d erkundet=%d")
+		:format(#(data.newlyVisible or {}), #(data.newlyHidden or {}), #(data.newlyExplored or {})))
 	task.spawn(function() applyVisionDelta(data) end)
 end)
 

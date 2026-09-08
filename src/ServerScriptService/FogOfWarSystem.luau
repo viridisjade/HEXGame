@@ -138,42 +138,61 @@ local function computeVisible(player)
 	return visible
 end
 
+local function countSet(s)
+	local n = 0
+	for _ in pairs(s or {}) do n = n + 1 end
+	return n
+end
+
 --------------------------------------------------------------------------------
 -- UPDATE VISION (Kern)
 -- Berechnet sichtbar, merged explored, sendet Delta.
 --------------------------------------------------------------------------------
 function FogOfWarSystem.UpdateVision(player)
-	if not player then return end
-	if not player.Parent then return end  -- Spieler ist weg
-
-	local state = FogOfWarData.GetOrCreate(player)
-	if not state then return end
-
-	-- 1) Neue sichtbare Menge berechnen.
-	local newVisible = computeVisible(player)
-
-	local oldVisible = state.visible or {}
-
-	-- 2) Vergleich: neu sichtbar vs. nicht mehr sichtbar.
-	local newlyVisible = {}
-	local newlyHidden = {}
-	for key in pairs(newVisible) do
-		if not oldVisible[key] then newlyVisible[key] = true end
+	if not player then
+		warn("[FogOfWar] UpdateVision OHNE Spieler aufgerufen")
+		return
 	end
-	for key in pairs(oldVisible) do
-		if not newVisible[key] then newlyHidden[key] = true end
+	if not player.Parent then
+		return -- Spieler ist weg
 	end
 
-	-- 3) Explored = explored UNION visible (permanent, nie entfernen).
-	local newlyExplored = FogOfWarData.AddExplored(player, newVisible)
+	local ok, err = pcall(function()
+		local state = FogOfWarData.GetOrCreate(player)
+		if not state then return end
 
-	-- 4) Neuen Zustand speichern.
-	state.visible = newVisible
+		-- 1) Neue sichtbare Menge berechnen.
+		local newVisible = computeVisible(player)
 
-	-- 5) Delta an den Client senden. Neu-erkundete Felder werden dem Client
-	--    auch als explored gemeldet (auch wenn sie bereits visible sind:
-	--    der Client setzt sie direkt auf visible).
-	FogOfWarSystem.SendVisionDelta(player, newlyVisible, newlyHidden, newlyExplored)
+		local oldVisible = state.visible or {}
+
+		-- 2) Vergleich: neu sichtbar vs. nicht mehr sichtbar.
+		local newlyVisible = {}
+		local newlyHidden = {}
+		for key in pairs(newVisible) do
+			if not oldVisible[key] then newlyVisible[key] = true end
+		end
+		for key in pairs(oldVisible) do
+			if not newVisible[key] then newlyHidden[key] = true end
+		end
+
+		-- 3) Explored = explored UNION visible (permanent, nie entfernen).
+		local newlyExplored = FogOfWarData.AddExplored(player, newVisible)
+
+		-- 4) Neuen Zustand speichern.
+		state.visible = newVisible
+
+		print(("[FogOfWar] UpdateVision %s | sichtbar=%d neu=%d hidden=%d erkundet=%d")
+			:format(player.Name, countSet(newVisible), countSet(newlyVisible),
+				countSet(newlyHidden), countSet(newlyExplored)))
+
+		-- 5) Delta an den Client senden.
+		FogOfWarSystem.SendVisionDelta(player, newlyVisible, newlyHidden, newlyExplored)
+	end)
+
+	if not ok then
+		warn("[FogOfWar] UpdateVision FEHLER (" .. tostring(player.Name) .. "): " .. tostring(err))
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -187,11 +206,15 @@ function FogOfWarSystem.SendVisionDelta(player, newlyVisible, newlyHidden, newly
 		or next(newlyExplored) ~= nil
 	if not hasChange then return end
 
-	fire(player, "FogOfWarUpdate", {
+	local payload = {
 		newlyVisible = FogOfWarData.setToArray(newlyVisible),
 		newlyHidden  = FogOfWarData.setToArray(newlyHidden),
 		newlyExplored = FogOfWarData.setToArray(newlyExplored),
-	})
+	}
+	print(("[FogOfWar] Sende Delta an %s | neu=%d hidden=%d erkundet=%d")
+		:format(player.Name, #payload.newlyVisible, #payload.newlyHidden, #payload.newlyExplored))
+
+	fire(player, "FogOfWarUpdate", payload)
 end
 
 --------------------------------------------------------------------------------
@@ -208,10 +231,14 @@ function FogOfWarSystem.SendFullVision(player)
 		state = FogOfWarData.GetOrCreate(player)
 	end
 
-	fire(player, "FogOfWarInit", {
+	local payload = {
 		visible  = FogOfWarData.setToArray(state.visible),
 		explored = FogOfWarData.setToArray(state.explored),
-	})
+	}
+	print(("[FogOfWar] Sende FULL-State an %s | visible=%d explored=%d")
+		:format(player.Name, #payload.visible, #payload.explored))
+
+	fire(player, "FogOfWarInit", payload)
 end
 
 --------------------------------------------------------------------------------

@@ -181,7 +181,11 @@ local function startRound()
 	-- Fog of War: Beim Rundenstart die Sicht aller Spieler auffrischen
 	-- (Bewegung/Bau/Kampf koennen Sichtquellen veraendert haben).
 	for _, player in ipairs(Players:GetPlayers()) do
+		-- 1) Delta berechnen/senden (Aenderungen).
 		pcall(FogOfWarSystem.UpdateVision, player)
+		-- 2) Vollen State neu senden (Korrektur, falls der Client das
+		--    einmalige FogOfWarInit beim Join verpasst hat).
+		pcall(FogOfWarSystem.SendFullVision, player)
 	end
 
 	print("[RoundSystem] === Runde " .. currentRound .. " gestartet (" .. CONFIG.ROUND_DURATION .. "s) ===")
