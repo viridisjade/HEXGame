@@ -362,6 +362,20 @@ local function hideEverything()
 	for _, child in ipairs(hexMapFolder:GetChildren()) do
 		setModelVisibility(child, false, 1)
 	end
+
+	-- Expliziter Soil-Pass: schaltet auch alle Soil-Modelle auf Transparency = 1.
+	-- (Robust - falls der generische Kinder-Loop das Soils-Folder nicht erfasst
+	-- hat oder Soils spaeter/spawnweise hinzukommen.)
+	local soilCount = 0
+	if soilsFolder then
+		for _, soilTypeFolder in ipairs(soilsFolder:GetChildren()) do
+			for _, soil in ipairs(soilTypeFolder:GetChildren()) do
+				setModelVisibility(soil, false, 1)
+				soilCount = soilCount + 1
+			end
+		end
+	end
+	print("[FogOfWar] hideEverything | Soils versteckt: " .. soilCount)
 end
 
 --------------------------------------------------------------------------------
