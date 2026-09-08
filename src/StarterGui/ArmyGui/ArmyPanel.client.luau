@@ -2,24 +2,29 @@
     ArmyPanel (LocalScript)
     Ort: StarterGui > ArmyGui > ArmyPanel
 
-    Komplette Army-Oberflaeche, jetzt EVENT-GETRIEBEN:
+    Dynamische Army-Oberflaeche mit LIVE-Slot-Grid.
 
-    VORHER (Performance-Probleme):
-      - 0.5s Poll-Loop: Net.Invoke("GetArmy") alle 0.5s, dauerhaft.
-      - N+1 RPC: fuer jeden Unit ein eigenes Net.Invoke("GetUnit").
-      - applyCombatLock spawnte alle 0.5s eine Task.
+    VORHER:
+      - 16 statische GUI-Elemente (UnitImage1-8 / UnitName1-8) in Studio
+        modelliert, einzeln abgefragt. Brach ab einer Armee-Groesse > 8.
+      - 0.5s Poll-Loop + N+1 RPC (1x GetArmy + 8x GetUnit).
 
     JETZT:
-      - Die Daten kommen aus EINEM Modul (ArmyDataCache), das die komplette
-        Army in EINEM Batch-Call (GetArmyDetail) laedt.
-      - Refresh passiert nur bei Auswahl-Wechsel, Server-Push (ArmyStatsChanged)
-        oder Kampfzustands-Aenderung - KEIN Polling.
-      - Der Kampf-Lock hoert auf ein eigenes Event (OnArmyCombatChanged).
+      - Die Unit-Slots werden per CODE in einem "UnitSlotsContainer" erzeugt.
+        Anzahl richtet sich nach der maximalen Armee-Groesse
+        (armyData.maxUnits = Basis 8 + Logistics-Tech-Bonus).
+      - UIGridLayout bricht automatisch nach SLOTS_PER_ROW um
+        (Reihe 1: 1-5, Reihe 2: 6-10, ...).
+      - Leere Slots = leerer Rahmen (transparent + Stroke).
+        Belegte Slots = Unit-Icon + Name.
+      - Event-getrieben: keine Poll-Loops am Client.
+        Die Daten kommen aus ArmyDataCache (1 Batch-Call GetArmyDetail).
 
-    Ablauf:
-      1) ArmyDataCache.OnUpdated -> render(army)
-      2) State.OnChanged (ARMY)  -> oeffnen/schliessen
-      3) State.OnArmyCombatChanged -> Kampf-Lock setzen
+    LIVE-TECH-UPDATE:
+      - Erforscht der Spieler "Logistics" waehrend das Panel offen ist, feuert
+        der Server (TechTreeSystem.ApplyEffect -> ArmyStats.Recalculate ->
+        _G.NotifyArmyStatsChanged) -> ArmyDataCache.Refresh -> GetArmyDetail
+        liefert neues maxUnits -> updateSlots() rendert das Grid neu.
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,6 +32,26 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local State = require(ReplicatedStorage:WaitForChild("ClientState"))
 local ArmyDataCache = require(ReplicatedStorage:WaitForChild("ArmyDataCache"))
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
+
+--------------------------------------------------------------------------------
+-- SLOT-KONFIGURATION (zentral, anpassbar)
+--------------------------------------------------------------------------------
+local SLOT_CONFIG = {
+	SLOTS_PER_ROW        = 5,
+	SLOT_SIZE            = UDim2.new(0, 52, 0, 56),   -- an das MainframeArmy-Layout angepasst
+	SLOT_PADDING         = UDim2.new(0, 6, 0, 6),
+	-- Position des UnitSlotsContainer innerhalb MainframeArmy
+	CONTAINER_POSITION   = UDim2.new(0.04, 0, 0.38, 0),
+	CONTAINER_SIZE       = UDim2.new(0.72, 0, 0.42, 0),
+	CONTAINER_NAME       = "UnitSlotsContainer",
+	MAX_UNITS            = 99,                        -- harte Obergrenze gegen Spam
+	EMPTY_SLOT_COLOR      = Color3.fromRGB(80, 80, 80),
+	EMPTY_SLOT_TRANSPARENCY = 0.7,
+	EMPTY_SLOT_BORDER_COLOR = Color3.fromRGB(150, 150, 150),
+	SELECTED_SLOT_COLOR   = Color3.fromRGB(255, 215, 0), -- Gold
+	SLOT_BORDER_COLOR     = Color3.fromRGB(255, 255, 255),
+	SLOT_BORDER_SPEED     = 0.35,
+}
 
 --------------------------------------------------------------------------------
 -- 1) GUI-REFERENZEN
@@ -42,9 +67,7 @@ end
 
 gui.Enabled = false
 
-local MAX_SLOTS = 8
 local frame = gui:FindFirstChild("MainframeArmy")
-
 if not frame then
 	warn("[ArmyPanel] MainframeArmy fehlt in " .. gui:GetFullName())
 end
@@ -53,18 +76,325 @@ local function pick(parent, name)
 	return parent and parent:FindFirstChild(name) or nil
 end
 
-local statFrame = pick(frame, "ArmyStatFrame")
+-- Statische GUI-Elemente (bleiben UNVERAENDERT)
+local statFrame      = pick(frame, "ArmyStatFrame")
+local lblName        = pick(gui, "ArmyNameLable") or pick(frame, "ArmyNameLable")
+local lblAttack      = pick(statFrame, "ArmyAttackLabel")
+local lblDefense     = pick(statFrame, "ArmyDefensiveLabel")
+local lblHealth      = pick(statFrame, "ArmyHealthbarLabel")
+local lblMove        = pick(statFrame, "ArmyMoveLabel")
+local lblSight       = pick(statFrame, "ArmySightLabel")
+local unitFrame      = pick(frame, "UnitStatFrame")
+local hoverImage     = pick(frame, "HoverUnitImage")
+local uName          = pick(unitFrame, "UnitNameLable")
+local uHealth        = pick(unitFrame, "HealthNumberLabel")
+local uAttack        = pick(unitFrame, "UnitAttackLable")
+local uDefense       = pick(unitFrame, "UnitDefenseLable")
+local uSight         = pick(unitFrame, "UnitSightLable")
+local uMovement      = pick(unitFrame, "UnitMovementLable")
+local buildBtn       = pick(frame, "BuildCampButton")
+local stopSelectBtn  = pick(frame, "StopSelectButton")
 
-local lblName    = pick(gui, "ArmyNameLable") or pick(frame, "ArmyNameLable")
-local lblAttack  = pick(statFrame, "ArmyAttackLabel")
-local lblDefense = pick(statFrame, "ArmyDefensiveLabel")
-local lblHealth  = pick(statFrame, "ArmyHealthbarLabel")
-local lblMove    = pick(statFrame, "ArmyMoveLabel")
-local lblSight   = pick(statFrame, "ArmySightLabel")
+--------------------------------------------------------------------------------
+-- OPEN/CLOSE + DYNAMISCHE SLOTS
+--------------------------------------------------------------------------------
+local MAX_SLOTS = SLOT_CONFIG.MAX_UNITS
+local slotGrid = {}          -- index -> { frame, icon, name, unitId }
+local cachedMaxUnits = 0     -- letzter bekannter Wert, um Grid neu zu bauen
+local shownUnitId = nil      -- aktuell ausgewaehlte Unit
 
-local buildBtn = pick(frame, "BuildCampButton")
+--------------------------------------------------------------------------------
+-- Aufraeumen: alte statische Slots (UnitImage1-8 / UnitName1-8) entfernen.
+-- Die Slots sitzen direkt in MainframeArmy (ausgestattet im alten Layout).
+--------------------------------------------------------------------------------
+local function cleanupLegacySlots()
+	if not frame then return end
+	for _, child in ipairs(frame:GetChildren()) do
+		if child.Name:match("^UnitImage%d+$") or child.Name:match("^UnitName%d+$") then
+			child:Destroy()
+		end
+	end
+end
 
--- "in combat" indicator + "watch combat" button (created at runtime if missing).
+--------------------------------------------------------------------------------
+-- UnitSlotsContainer erstellen (einmalig).
+--------------------------------------------------------------------------------
+local slotsContainer = frame and frame:FindFirstChild(SLOT_CONFIG.CONTAINER_NAME)
+if frame and not slotsContainer then
+	slotsContainer = Instance.new("Frame")
+	slotsContainer.Name = SLOT_CONFIG.CONTAINER_NAME
+	slotsContainer.BackgroundTransparency = 1
+	slotsContainer.BorderSizePixel = 0
+	slotsContainer.Position = SLOT_CONFIG.CONTAINER_POSITION
+	slotsContainer.Size = SLOT_CONFIG.CONTAINER_SIZE
+	slotsContainer.ZIndex = 2
+	slotsContainer.Parent = frame
+
+	local layout = Instance.new("UIGridLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.FillDirectionMaxCells = SLOT_CONFIG.SLOTS_PER_ROW
+	layout.CellSize = SLOT_CONFIG.SLOT_SIZE
+	layout.CellPadding = SLOT_CONFIG.SLOT_PADDING
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = slotsContainer
+end
+
+-- Forward-Deklarationen:
+-- Diese Funktionen referenzieren sich gegenseitig. In Lua sind `local function`
+-- nur ab ihrer Deklarationsstelle sichtbar, daher deklarieren wir die Namen vorab
+-- und weisen sie spaeter zu (sonst wuerden Aufrufe auf `nil` laufen).
+local renderUnitSlots
+local updateSlots
+local renderStats
+local showUnitDetail
+local clearUnitDetail
+local clearAll
+
+-- Hover-Vorschau: Zeigt beim Ueberfahren eines Slots das Unit-Icon.
+local function setHoverImage(unit)
+	if not hoverImage then return end
+	if unit and unit.icon and unit.icon ~= "" then
+		hoverImage.Image = unit.icon
+		hoverImage.Visible = true
+	else
+		hoverImage.Visible = false
+	end
+end
+
+--------------------------------------------------------------------------------
+-- EINZELNE SLOT-KACHEL bauen
+--------------------------------------------------------------------------------
+local function buildSlot(index)
+	local holder = Instance.new("Frame")
+	holder.Name = "Slot_" .. index
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.new(1, 0, 1, 0)  -- richtet sich nach UIGridLayout
+	holder.LayoutOrder = index
+	holder.Parent = slotsContainer
+
+	-- Icon als ImageButton (leerer Rahmen wenn kein Bild)
+	local icon = Instance.new("ImageButton")
+	icon.Name = "Icon"
+	icon.Size = UDim2.new(1, 0, 0.72, 0)
+	icon.Position = UDim2.new(0, 0, 0, 0)
+	icon.AnchorPoint = Vector2.new(0, 0)
+	icon.BackgroundColor3 = SLOT_CONFIG.EMPTY_SLOT_COLOR
+	icon.BackgroundTransparency = SLOT_CONFIG.EMPTY_SLOT_TRANSPARENCY
+	icon.ImageTransparency = 1  -- kein Bild => transparenter Rahmen
+	icon.ScaleType = Enum.ScaleType.Fit
+	icon.BorderSizePixel = 0
+	icon.AutoButtonColor = false
+	icon.ZIndex = 3
+	icon.Parent = holder
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = icon
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = SLOT_CONFIG.EMPTY_SLOT_BORDER_COLOR
+	stroke.Thickness = 1
+	stroke.Transparency = 0.3
+	stroke.Parent = icon
+
+	-- Name darunter (kleiner Text)
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.Size = UDim2.new(1, 0, 0.28, 0)
+	nameLabel.Position = UDim2.new(0, 0, 0.74, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Font = Enum.Font.Gotham
+	nameLabel.TextSize = 11
+	nameLabel.TextColor3 = Color3.fromRGB(238, 240, 248)
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	nameLabel.Text = ""
+	nameLabel.ZIndex = 3
+	nameLabel.Parent = holder
+
+	return { holder = holder, icon = icon, name = nameLabel, unitId = nil }
+end
+
+--------------------------------------------------------------------------------
+-- Hover-Handler auf einen Slot (zeigt HoverUnitImage fuer belegte Slots)
+--------------------------------------------------------------------------------
+local function attachHover(slotFrame, getUnitId)
+	slotFrame.MouseEnter:Connect(function()
+		local unitId = getUnitId()
+		if not unitId then return end
+		local unit = ArmyDataCache.GetUnit(unitId)
+		if unit then setHoverImage(unit) end
+	end)
+	slotFrame.MouseLeave:Connect(function()
+		setHoverImage(nil)
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- SLOT-ZUSTAND setzen (leer oder belegt)
+--------------------------------------------------------------------------------
+local function styleSlot(slot, unit, isSelected)
+	if not slot then return end
+
+	slot.unitId = unit and unit.id or nil
+
+	if unit then
+		slot.icon.Image = unit.icon or ""
+		slot.icon.ImageTransparency = (unit.icon and unit.icon ~= "") and 0 or 1
+		slot.icon.BackgroundTransparency = 0.2
+		slot.icon.BackgroundColor3 = Color3.fromRGB(40, 44, 56)
+		slot.name.Text = unit.name or unit.unitType or ""
+	else
+		slot.icon.Image = ""
+		slot.icon.ImageTransparency = 1
+		slot.icon.BackgroundTransparency = SLOT_CONFIG.EMPTY_SLOT_TRANSPARENCY
+		slot.icon.BackgroundColor3 = SLOT_CONFIG.EMPTY_SLOT_COLOR
+		slot.name.Text = ""
+	end
+
+	-- Auswahl (Gold-Highlight)
+	local stroke = slot.icon:FindFirstChildOfClass("UIStroke")
+	if isSelected then
+		if stroke then
+			stroke.Color = SLOT_CONFIG.SELECTED_SLOT_COLOR
+			stroke.Thickness = 2.5
+			stroke.Transparency = 0
+		end
+	else
+		if stroke then
+			stroke.Color = SLOT_CONFIG.EMPTY_SLOT_BORDER_COLOR
+			stroke.Thickness = 1
+			stroke.Transparency = unit and 0.3 or 0.5
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- renderUnitSlots(armyData): Grid neu bauen (wenn maxUnits sich aendert)
+--------------------------------------------------------------------------------
+renderUnitSlots = function(army)
+	if not slotsContainer then return end
+
+	local maxUnits = math.clamp(army and army.maxUnits or 8, 1, MAX_SLOTS)
+	if maxUnits == cachedMaxUnits then return end   -- nichts geaendert -> ueberspringen
+	cachedMaxUnits = maxUnits
+
+	-- Alte Slots entfernen
+	for i = #slotGrid, 1, -1 do
+		if slotGrid[i].holder then slotGrid[i].holder:Destroy() end
+	end
+	slotGrid = {}
+
+	-- Neue Slots ueber maxUnits erstellen
+	for i = 1, maxUnits do
+		local slot = buildSlot(i)
+		-- Click -> Unit auswaehlen (nur wenn belegt)
+		slot.icon.MouseButton1Click:Connect(function()
+			local armyNow = ArmyDataCache.Get()
+			local unit = armyNow and armyNow.units and armyNow.units[i] or nil
+			if unit then showUnitDetail(unit.id, i) end
+		end)
+		attachHover(slot.holder, function() return slotGrid[i] and slotGrid[i].unitId or nil end)
+		slotGrid[i] = slot
+	end
+end
+
+--------------------------------------------------------------------------------
+-- updateSlots(armyData): Icons/Namen auffrischen, nur selten Grid neu bauen
+--------------------------------------------------------------------------------
+updateSlots = function(army)
+	if not army then
+		clearAll()
+		return
+	end
+
+	local maxUnits = math.clamp(army.maxUnits or 8, 1, MAX_SLOTS)
+	-- Grid neu bauen falls sich die maximale Groesse geaendert hat (z.B. Logistics).
+	if maxUnits ~= cachedMaxUnits then
+		renderUnitSlots(army)
+	end
+
+	for i = 1, math.min(maxUnits, #slotGrid) do
+		local slot = slotGrid[i]
+		local unit = army.units and army.units[i] or nil
+		-- Gold-Highlight bleibt an der Unit-ID haengen (auch nach Grid-Rebuild).
+		styleSlot(slot, unit, unit ~= nil and unit.id == shownUnitId)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Army-Stat-Anzeige
+--------------------------------------------------------------------------------
+renderStats = function(army)
+	if lblName then lblName.Text = army.name or ("Army " .. army.id) end
+	local st = army.stats or {}
+	if lblAttack then lblAttack.Text = (st.Attack or 0) .. " Attack" end
+	if lblDefense then lblDefense.Text = (st.Defense or 0) .. " Defense" end
+	if lblHealth then lblHealth.Text = (st.LP or 0) .. "/" .. (st.MaxLP or 0) end
+	if lblSight then lblSight.Text = (st.Sight or 0) .. " Sight" end
+	if lblMove then
+		local cur = st.Movement or 0
+		lblMove.Text = cur .. "/" .. (st.MaxMovement or cur) .. " Move"
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Unit-Detailansicht (UnitStatFrame) bei Slot-Klick
+--------------------------------------------------------------------------------
+showUnitDetail = function(unitId, slotIndex)
+	local army = ArmyDataCache.Get()
+	local unit = army and army.units and army.units[slotIndex] or nil
+	if not unit then
+		clearUnitDetail()
+		return
+	end
+
+	shownUnitId = unitId
+
+	if unitFrame then unitFrame.Visible = true end
+	if hoverImage then hoverImage.Image = unit.icon or "" hoverImage.Visible = true end
+	if uName then uName.Text = unit.name or unit.unitType end
+	if uHealth then uHealth.Text = unit.currentLP .. "/" .. unit.maxLP end
+	if uAttack then uAttack.Text = unit.attack .. " Attack" end
+	if uDefense then uDefense.Text = unit.defense .. " Defense" end
+	if uSight then uSight.Text = unit.sight .. " Sight" end
+	if uMovement then uMovement.Text = unit.currentMovement .. "/" .. unit.maxMovement .. " Move" end
+
+	-- Gold-Highlight auf dem ausgewaehlten Slot (nur belegte Slots)
+	for i = 1, #slotGrid do
+		if slotGrid[i] then
+			local sUnit = army.units[i]
+			styleSlot(slotGrid[i], sUnit, sUnit ~= nil and i == slotIndex)
+		end
+	end
+end
+
+clearUnitDetail = function()
+	shownUnitId = nil
+	if unitFrame then unitFrame.Visible = false end
+	if hoverImage then hoverImage.Visible = false end
+end
+
+clearAll = function()
+	renderStats({})
+	if slotsContainer then
+		for i = 1, #slotGrid do
+			local slot = slotGrid[i]
+			if slot then
+				slot.icon.Image = ""
+				slot.icon.ImageTransparency = 1
+				slot.icon.BackgroundTransparency = SLOT_CONFIG.EMPTY_SLOT_TRANSPARENCY
+				slot.name.Text = ""
+			end
+		end
+	end
+	clearUnitDetail()
+end
+
+--------------------------------------------------------------------------------
+-- Kampf-Lock (event-getrieben, wie zuvor)
+--------------------------------------------------------------------------------
+local inCombat = false
 local combatLabel = frame and frame:FindFirstChild("InCombatLabel")
 if frame and not combatLabel then
 	combatLabel = Instance.new("TextLabel")
@@ -97,109 +427,6 @@ if frame and not watchBtn then
 	watchBtn.Parent = frame
 end
 
-local unitFrame  = pick(frame, "UnitStatFrame")
-local unitImage  = pick(frame, "HoverUnitImage")
-local uName      = pick(unitFrame, "UnitNameLable")
-local uHealth    = pick(unitFrame, "HealthNumberLabel")
-local uAttack    = pick(unitFrame, "UnitAttackLable")
-local uDefense   = pick(unitFrame, "UnitDefenseLable")
-local uSight     = pick(unitFrame, "UnitSightLable")
-local uMovement  = pick(unitFrame, "UnitMovementLable")
-
-local slots = {}
-for i = 1, MAX_SLOTS do
-	slots[i] = {
-		image = pick(frame, "UnitImage" .. i) or pick(gui, "UnitImage" .. i),
-		name  = pick(frame, "UnitName" .. i)  or pick(gui, "UnitName" .. i),
-	}
-end
-
-local shownUnitId = nil
-
---------------------------------------------------------------------------------
--- 2) RENDER-HILFEN
---------------------------------------------------------------------------------
-local function clearSlots()
-	for i = 1, MAX_SLOTS do
-		local s = slots[i]
-		if s.image then s.image.Image = "" s.image.Visible = false end
-		if s.name then s.name.Text = "" s.name.Visible = false end
-	end
-end
-
-local function clearUnitDetail()
-	shownUnitId = nil
-	if unitFrame then unitFrame.Visible = false end
-	if unitImage then unitImage.Image = "" unitImage.Visible = false end
-end
-
-local function clearAll()
-	if lblName then lblName.Text = "" end
-	if lblAttack then lblAttack.Text = "0 Attack" end
-	if lblDefense then lblDefense.Text = "0 Defense" end
-	if lblHealth then lblHealth.Text = "0/0" end
-	if lblMove then lblMove.Text = "0/0 Move" end
-	if lblSight then lblSight.Text = "0 Sight" end
-	clearSlots()
-	clearUnitDetail()
-end
-
-local function fillSlots(army)
-	clearSlots()
-	if not army or not army.units then return end
-
-	for i, unit in ipairs(army.units) do
-		if i > MAX_SLOTS then break end
-		local s = slots[i]
-		if not s.image and not s.name then continue end
-		if s.image then s.image.Image = unit.icon or "" s.image.Visible = true end
-		if s.name then s.name.Text = unit.name or unit.unitType s.name.Visible = true end
-	end
-end
-
-local function showUnitDetail(unitId)
-	local unit = ArmyDataCache.GetUnit(unitId)
-	if not unit then clearUnitDetail() return end
-
-	shownUnitId = unitId
-
-	if unitFrame then unitFrame.Visible = true end
-	if unitImage then unitImage.Image = unit.icon or "" unitImage.Visible = true end
-	if uName then uName.Text = unit.name or unit.unitType end
-	if uHealth then uHealth.Text = unit.currentLP .. "/" .. unit.maxLP end
-	if uAttack then uAttack.Text = unit.attack .. " Attack" end
-	if uDefense then uDefense.Text = unit.defense .. " Defense" end
-	if uSight then uSight.Text = unit.sight .. " Sight" end
-	if uMovement then uMovement.Text = unit.currentMovement .. "/" .. unit.maxMovement .. " Move" end
-end
-
-local function render(army)
-	if not army then
-		clearAll()
-		return
-	end
-
-	if lblName then lblName.Text = army.name or ("Army " .. army.id) end
-
-	local st = army.stats or {}
-	if lblAttack then lblAttack.Text = (st.Attack or 0) .. " Attack" end
-	if lblDefense then lblDefense.Text = (st.Defense or 0) .. " Defense" end
-	if lblHealth then lblHealth.Text = (st.LP or 0) .. "/" .. (st.MaxLP or 0) end
-	if lblSight then lblSight.Text = (st.Sight or 0) .. " Sight" end
-	if lblMove then
-		local cur = st.Movement or 0
-		lblMove.Text = cur .. "/" .. (st.MaxMovement or cur) .. " Move"
-	end
-
-	fillSlots(army)
-	if shownUnitId then showUnitDetail(shownUnitId) end
-end
-
---------------------------------------------------------------------------------
--- 3) KAMPF-LOCK (event-getrieben)
---------------------------------------------------------------------------------
-local inCombat = false
-
 local function applyCombatLock()
 	local armyId = State.GetId(State.Kind.ARMY)
 	inCombat = State.IsArmyInCombat ~= nil
@@ -208,20 +435,18 @@ local function applyCombatLock()
 	if combatLabel then combatLabel.Visible = inCombat end
 	if watchBtn then watchBtn.Visible = inCombat end
 	if buildBtn then
-		-- No camp building while fighting.
 		buildBtn.Active = not inCombat
 		buildBtn.AutoButtonColor = not inCombat
 	end
 end
 
 --------------------------------------------------------------------------------
--- 4) OEFFNEN / SCHLIESSEN
+-- OEFFNEN / SCHLIESSEN
 --------------------------------------------------------------------------------
 local function show()
 	gui.Enabled = true
-	-- Combat-Status direkt beim Oeffnen setzen (kein Warten auf Poll).
+	cleanupLegacySlots()
 	applyCombatLock()
-	-- Daten frisch laden (oder aus Cache), dann rendern.
 	ArmyDataCache.Refresh()
 end
 
@@ -232,14 +457,17 @@ local function hide()
 end
 
 --------------------------------------------------------------------------------
--- 5) VERBINDUNGEN
+-- VERBINDUNGEN
 --------------------------------------------------------------------------------
--- Army-Daten sind da (oder Auswahl aufgehoben).
 ArmyDataCache.OnUpdated:Connect(function(army)
-	render(army)
+	if not army then
+		clearAll()
+		return
+	end
+	renderStats(army)
+	updateSlots(army)
 end)
 
--- Auswahl: Army -> anzeigen, sonst -> verstecken.
 State.OnChanged:Connect(function(kind, id)
 	if kind == State.Kind.ARMY and id then
 		show()
@@ -248,66 +476,43 @@ State.OnChanged:Connect(function(kind, id)
 	end
 end)
 
--- Kampf-Lock reagiert sofort, ohne Polling.
 if State.OnArmyCombatChanged then
 	State.OnArmyCombatChanged:Connect(function(armyId)
-		if State.GetId(State.Kind.ARMY) == armyId then
-			applyCombatLock()
-		end
+		if State.GetId(State.Kind.ARMY) == armyId then applyCombatLock() end
 	end)
 end
 
--- Unit-Kacheln: Klick -> Detailansicht.
-for i = 1, MAX_SLOTS do
-	local btn = slots[i].image
-	if btn and (btn:IsA("ImageButton") or btn:IsA("TextButton")) then
-		btn.MouseButton1Click:Connect(function()
-			local army = ArmyDataCache.Get()
-			if not army or not army.units then return end
-			local unit = army.units[i]
-			if unit then showUnitDetail(unit.id) end
-		end)
-	end
+-- StopSelectButton: aktuelle Unit deselektieren
+if stopSelectBtn then
+	stopSelectBtn.MouseButton1Click:Connect(function()
+		clearUnitDetail()
+	end)
 end
 
 if watchBtn then
-	-- Re-opens the combat overlay for a fight that is already running.
 	watchBtn.Activated:Connect(function()
 		local openEvent = ReplicatedStorage:FindFirstChild("OpenCombatView")
-		if openEvent then
-			openEvent:Fire()
-		else
-			warn("[ArmyPanel] OpenCombatView BindableEvent fehlt")
-		end
+		if openEvent then openEvent:Fire() end
 	end)
 end
 
 if buildBtn then
 	buildBtn.MouseButton1Click:Connect(function()
 		local armyId = State.GetId(State.Kind.ARMY)
-		if not armyId then
-			print("[ArmyPanel] Keine Army ausgewählt")
-			return
-		end
+		if not armyId then return end
 		if inCombat then
 			print("[ArmyPanel] Army ist im Kampf - Camp-Bau blockiert")
 			return
 		end
-		print("[ArmyPanel] Camp-Bau angefordert für Army " .. armyId)
 		Net.Fire("RequestBuildCamp", armyId)
 	end)
-else
-	warn("[ArmyPanel] BuildCampButton fehlt in MainframeArmy")
 end
 
 --------------------------------------------------------------------------------
--- 6) BOOT
+-- BOOT
 --------------------------------------------------------------------------------
+cleanupLegacySlots()
 local kind, id = State.Get()
-if kind == State.Kind.ARMY and id then
-	show()
-else
-	hide()
-end
+if kind == State.Kind.ARMY and id then show() else hide() end
 
-print("[ArmyPanel] Bereit (event-driven).")
+print("[ArmyPanel] Bereit (dynamische Unit-Slots, event-driven).")

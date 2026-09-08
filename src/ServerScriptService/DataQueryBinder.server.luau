@@ -34,6 +34,7 @@ local BuildingCostSystem = require(script.Parent:WaitForChild("BuildingCostSyste
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
+local ArmySystem = require(script.Parent:WaitForChild("ArmySystem"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -96,6 +97,9 @@ local function getArmyDetail(player, armyId)
 		q = army.q,
 		r = army.r,
 		ownerName = army.owner and army.owner.Name or nil,
+		-- Maximale Armee-Groesse (Basis 8 + Logistics-Tech-Bonus).
+		-- Der Client nutzt das fuer die dynamischen Unit-Slots.
+		maxUnits = ArmySystem.GetMaxUnits(armyId),
 		stats = army.stats,
 		units = units,
 	}
