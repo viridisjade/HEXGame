@@ -168,4 +168,36 @@ function ClientState.ClearArmyCombat()
 	armiesInCombat = {}
 end
 
+--------------------------------------------------------------------------------
+-- DIPLOMATIE STATE (lokaler Client-Cache)
+-- Der Server pusht DiplomacyUpdate/DiplomacyNotification; der Client speichert
+-- hier den letzten Stand und feuert OnDiplomacyChanged an die GUIs.
+--------------------------------------------------------------------------------
+local diplomacyRelations = {}   -- [otherUserId] = "Allied"|"Neutral"|"War"
+local diplomacyOffers = {}      -- [offerId] = offer
+
+local diplomacyEvent = Instance.new("BindableEvent")
+ClientState.OnDiplomacyChanged = diplomacyEvent.Event
+
+function ClientState.SetDiplomacy(relations, offers)
+	diplomacyRelations = relations or {}
+	diplomacyOffers = offers or {}
+	diplomacyEvent:Fire(diplomacyRelations, diplomacyOffers)
+end
+
+function ClientState.GetDiplomacyRelations()
+	return diplomacyRelations
+end
+
+function ClientState.GetDiplomacyOffers()
+	return diplomacyOffers
+end
+
+-- BindableEvent zum Oeffnen/Schliessen des Diplomatie-Fensters
+local diplomacyToggle = Instance.new("BindableEvent")
+ClientState.ToggleDiplomacy = diplomacyToggle.Event
+function ClientState.FireToggleDiplomacy()
+	diplomacyToggle:Fire()
+end
+
 return ClientState

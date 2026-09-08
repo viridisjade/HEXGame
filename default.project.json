@@ -47,12 +47,29 @@
         },
         "$path": "src/StarterGui/CombatGui"
       },
+      "DiplomacyGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/DiplomacyGui"
+      },
       "EmpireOverlayGui": {
         "$className": "ScreenGui",
         "$properties": {
           "ZIndexBehavior": "Sibling"
         },
         "$path": "src/StarterGui/EmpireOverlayGui"
+      },
+      "NotificationGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ResetOnSpawn": false,
+          "IgnoreGuiInset": true,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/NotificationGui"
       },
       "MovementGui": {
         "$className": "ScreenGui",

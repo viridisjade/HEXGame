@@ -27,6 +27,9 @@ local ROOT = {
 	-- Tech tree (client -> server)
 	TechAddToQueue = true, TechRemoveFromQueue = true,
 	TechReorderQueue = true,
+	-- Diplomatie (client -> server)
+	DiplomacySendOffer = true, DiplomacyRespondOffer = true,
+	DiplomacyDeclareWar = true, DiplomacyBreakAlliance = true,
 	-- NOTE: the server -> client combat events (CombatTurnStart,
 	-- CombatAutoResolveStart, ...) live in the DataRemotes folder and are
 	-- found through the fallback below - they must NOT be listed here.

@@ -458,8 +458,11 @@ function CombatSystem.StartCombat(attackerArmyId, defenderArmyId, q, r)
 
 	local isWildlife = (defenderArmy.owner == nil)
 
-	-- Allies never fight each other.
+	-- Allies never fight each other. (Diplomacy: AreAllied gilt nur fuer
+	-- "Allied"; "Neutral"/"War" duerfen kaempfen. Wildlife (owner == nil)
+	-- ist nie Verbündeter.)
 	if not isWildlife and type(DiplomacySystem.AreAllied) == "function"
+		and attackerArmy.owner and defenderArmy.owner
 		and DiplomacySystem.AreAllied(attackerArmy.owner, defenderArmy.owner) then
 		return nil, "Verbuendete - kein Angriff"
 	end

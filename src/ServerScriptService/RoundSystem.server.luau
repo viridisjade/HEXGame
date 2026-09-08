@@ -187,6 +187,14 @@ local function endRound()
 	print("[RoundSystem] === Runde " .. currentRound .. " beendet ===")
 	broadcastRoundEnd()
 
+	-- Diplomatie: abgelaufene Angebote (Bündnis-/Friedensantraege) verarbeiten.
+	local okDipl, DiplomacySystem = pcall(function()
+		return require(script.Parent:WaitForChild("DiplomacySystem"))
+	end)
+	if okDipl and DiplomacySystem then
+		pcall(DiplomacySystem.ProcessExpiredOffers)
+	end
+
 	task.wait(2)
 end
 

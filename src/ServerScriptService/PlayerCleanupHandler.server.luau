@@ -88,6 +88,14 @@ local function cleanupPlayer(player)
 
 	PlayerData.RemovePlayer(player)
 
+	-- Diplomatie-Zustand des Spielers (Beziehungen + Angebote) aufraeumen.
+	local okDipl, DiplomacySystem = pcall(function()
+		return require(script.Parent:WaitForChild("DiplomacySystem"))
+	end)
+	if okDipl and DiplomacySystem and DiplomacySystem.ClearPlayer then
+		pcall(DiplomacySystem.ClearPlayer, player)
+	end
+
 	print(LOG_PREFIX .. " " .. player.Name .. " aufgeräumt: "
 		.. stats.armies .. " Armeen, " .. stats.units .. " Units, "
 		.. stats.cities .. " Städte, " .. stats.camps .. " Camps, "

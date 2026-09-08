@@ -56,6 +56,9 @@ function PlayerData.InitPlayer(player, optionalColor)
 		cities = {},
 		cityCount = 0,
 		color = assignedColor,
+		-- Diplomatie-Zustand (siehe DiplomacyData / DiplomacySystem).
+		relations = {},       -- [otherUserId] = "Allied"|"Neutral"|"War"
+		pendingOffers = {},   -- Liste der laufenden Angebote
 	}
 
 	print("[PlayerData] Spieler initialisiert: " .. player.Name .. " (Farbe: " .. tostring(playerDataStore[player].color) .. ")")
@@ -231,6 +234,37 @@ function PlayerData.PrintStats(player)
 	print("  Provinzen: " .. data.provinceCount .. " (" .. table.concat(data.provinces, ", ") .. ")")
 	print("  Städte: " .. data.cityCount)
 	print("  Farbe: " .. tostring(data.color))
+end
+
+--------------------------------------------------------------------------------
+-- DIPLOMATIE
+--------------------------------------------------------------------------------
+function PlayerData.GetRelations(player)
+	local data = playerDataStore[player]
+	return data and data.relations or {}
+end
+
+function PlayerData.SetRelation(player, otherUserId, state)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.relations[otherUserId] = state
+end
+
+function PlayerData.GetRelation(player, otherUserId)
+	local data = playerDataStore[player]
+	if not data then return nil end
+	return data.relations[otherUserId]
+end
+
+function PlayerData.GetPendingOffers(player)
+	local data = playerDataStore[player]
+	return data and data.pendingOffers or {}
+end
+
+function PlayerData.SetPendingOffers(player, offers)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.pendingOffers = offers or {}
 end
 
 --------------------------------------------------------------------------------

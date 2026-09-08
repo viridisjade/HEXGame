@@ -326,10 +326,10 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 				.. finalHex.q .. ", " .. finalHex.r .. ") - Combat " .. tostring(combatId))
 			return 0
 		else
-			-- Frieden -> Bewegung blockiert
-			print("[MovementSystem] Ziel besetzt (Frieden) - Bewegung blockiert")
-			MovementOrderData.CompleteOrder(armyId)
-			return 0
+			-- Verbündet (nicht atWar) -> Armee darf das Hex betreten und mit der
+			-- verbündeten Armee koexistieren. Kein Kampf, keine Blockade.
+			print("[MovementSystem] Ziel besetzt (Verbündet) - Bewegung erlaubt")
+			-- fällt durch zur MoveArmy-Bewegung unten.
 		end
 	end
 

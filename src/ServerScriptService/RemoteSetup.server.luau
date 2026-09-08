@@ -111,6 +111,12 @@ ensure(dataRemotes, "RemoteEvent", "TechTreeUpdate")
 ensure(dataRemotes, "RemoteEvent", "TechResearched")
 ensure(dataRemotes, "RemoteFunction", "GetTechState")
 
+-- Diplomatie: server -> client push + state query
+ensure(dataRemotes, "RemoteEvent", "DiplomacyUpdate")
+ensure(dataRemotes, "RemoteEvent", "DiplomacyNotification")
+ensure(dataRemotes, "RemoteFunction", "GetDiplomacyState")
+ensure(dataRemotes, "RemoteFunction", "GetDiplomacyPlayers")
+
 ensure(ReplicatedStorage, "RemoteEvent", "RoundEnd")
 ensure(ReplicatedStorage, "RemoteEvent", "SkipRound")
 ensure(ReplicatedStorage, "RemoteFunction", "RequestRoute")
@@ -126,6 +132,12 @@ ensure(ReplicatedStorage, "RemoteEvent", "CombatAutoResolve")
 ensure(ReplicatedStorage, "RemoteEvent", "TechAddToQueue")
 ensure(ReplicatedStorage, "RemoteEvent", "TechRemoveFromQueue")
 ensure(ReplicatedStorage, "RemoteEvent", "TechReorderQueue")
+
+-- Diplomatie input (root level, mirrored in Net.ROOT)
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacySendOffer")
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacyRespondOffer")
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacyDeclareWar")
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacyBreakAlliance")
 
 local totalRF = 0
 local totalRE = 0
