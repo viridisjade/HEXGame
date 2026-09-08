@@ -317,8 +317,17 @@ local function closeDiplomacy()
 	gui.Enabled = false
 end
 
+-- Toggle-Handler: reagiert IDEMPOTENT auf den aktuellen Zustand. Der
+-- Empire-Button schaltet DiplomacyGui.Enabled bereits direkt um; dieses Event
+-- laedt beim Oeffnen die Daten nach (openDiplomacy) und raeumt beim Schliessen
+-- auf (closeDiplomacy). Beide setzen den Zustand absolut, nie inkrementell,
+-- damit es nicht zu Doppel-Toggles kommt.
 ClientState.ToggleDiplomacy:Connect(function()
-	if gui.Enabled then closeDiplomacy() else openDiplomacy() end
+	if gui.Enabled then
+		openDiplomacy()
+	else
+		closeDiplomacy()
+	end
 end)
 
 -- Statusanderungen live aktualisieren.

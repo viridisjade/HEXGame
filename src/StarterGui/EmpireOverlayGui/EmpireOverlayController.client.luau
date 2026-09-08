@@ -75,9 +75,23 @@ diplomacyButton.Active = true
 diplomacyButton.AutoButtonColor = true
 diplomacyButton.Interactable = true
 
--- Eigentlicher Toggle (oeffnen/schliessen). Läuft ueber das ClientState-
--- BindableEvent 'ToggleDiplomacy', das auch der DiplomacyGuiController hoert.
+-- Toggle (oeffnen/schliessen): Das Diplomatie-Fenster wird DIREKT ueber die
+-- PlayerGui > DiplomacyGui ScreenGui umgeschaltet (garantiert), damit der Klick
+-- auch dann funktioniert, wenn der DiplomacyGuiController (aus irgendeinem
+-- Grund) das BindableEvent noch nicht konsumiert. Das ClientState-Event wird
+-- zusaetzlich gefeuert, damit der Controller beim Oeffnen die Daten nachlaedt.
 diplomacyButton.Activated:Connect(function()
+	local PlayersService = game:GetService("Players")
+	local playerGui = PlayersService.LocalPlayer and PlayersService.LocalPlayer:FindFirstChild("PlayerGui")
+	local dipGui = playerGui and playerGui:FindFirstChild("DiplomacyGui")
+
+	if dipGui then
+		dipGui.Enabled = not dipGui.Enabled
+		print("[EmpireOverlay] DiplomacyGui direkt: Enabled = " .. tostring(dipGui.Enabled))
+	else
+		warn("[EmpireOverlay] DiplomacyGui nicht in PlayerGui gefunden - nutze nur Event-Pfad")
+	end
+
 	ClientState.FireToggleDiplomacy()
 end)
 print("[EmpireOverlay] DiplomacyOverlayButton mit DiplomatieGui verbunden")
