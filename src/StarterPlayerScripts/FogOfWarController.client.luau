@@ -198,7 +198,9 @@ local function setHexState(key, state)
 		setModelVisibility(hexModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
 		setModelVisibility(soilModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
 		setModelVisibility(building, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-		setModelVisibility(provinceModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
+		-- ProvinceHexes sind Farb-Overlays ueber dem Terrain: IMMER 50% transparent,
+		-- damit die Provinzfarbe UND das Terrain darunter sichtbar bleiben.
+		setModelVisibility(provinceModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
 		-- Units sichtbar.
 		for _, army in ipairs(armies) do
 			setModelVisibility(army, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
@@ -208,6 +210,7 @@ local function setHexState(key, state)
 		setModelVisibility(hexModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
 		setModelVisibility(soilModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
 		setModelVisibility(building, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
+		-- ProvinceHexes: auch erkundet 50% transparent.
 		setModelVisibility(provinceModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
 		-- Units UNSICHTBAR.
 		for _, army in ipairs(armies) do
