@@ -27,8 +27,9 @@ local HexSpawner = {}
 local ServerStorage = game:GetService("ServerStorage")
 local HexUtils = require(script.Parent:WaitForChild("HexUtils"))
 
--- Referenz auf die Hex-Templates
-local hexTemplatesFolder = ServerStorage:WaitForChild("HexTemplates")
+-- Referenz auf die Hex-Templates (mit Timeout, damit bei fehlendem Ordner
+-- kein "Infinite yield possible" entsteht).
+local hexTemplatesFolder = ServerStorage:WaitForChild("HexTemplates", 10)
 
 -- Terrain-Namen mapping (muss mit TerrainGenerator übereinstimmen)
 local terrainTemplateNames = {
@@ -83,6 +84,11 @@ function HexSpawner.getTemplate(terrainType)
 
 	if not templateName then
 		warn("[HexSpawner] Unbekannter Terrain-Typ: " .. tostring(terrainType))
+		return nil
+	end
+
+	if not hexTemplatesFolder then
+		warn("[HexSpawner] ServerStorage > HexTemplates fehlt - es werden keine Hex-Templates erzeugt")
 		return nil
 	end
 

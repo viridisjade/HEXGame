@@ -620,7 +620,7 @@ end)
 CityBuildState.OnChanged:Connect(function(placement)
 	if placement then
 		cityGui.Enabled = false
-	elseif CitySelectionState.HasSelection() then
+	elseif State.Has(State.Kind.CITY) then
 		showGui()
 	end
 end)

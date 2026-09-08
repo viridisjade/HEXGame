@@ -26,7 +26,7 @@
     
     Benötigt:
       ReplicatedStorage > CityDataCache        (ModuleScript)
-      ReplicatedStorage > CitySelectionState   (ModuleScript)
+      ReplicatedStorage > ClientState          (ModuleScript, als "State")
       ReplicatedStorage > DataRemotes > RequestMoveCitizen (RemoteEvent)
 --]]
 
@@ -34,7 +34,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local CityDataCache = require(ReplicatedStorage:WaitForChild("CityDataCache"))
-local CitySelectionState = require(ReplicatedStorage:WaitForChild("CitySelectionState"))
+local State = require(ReplicatedStorage:WaitForChild("ClientState"))
 
 local remotes = ReplicatedStorage:WaitForChild("DataRemotes")
 local requestMoveCitizen = remotes:WaitForChild("RequestMoveCitizen")
