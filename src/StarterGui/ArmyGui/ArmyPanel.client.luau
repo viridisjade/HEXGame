@@ -1,23 +1,35 @@
-
 --[[
     ArmyPanel (LocalScript)
     Ort: StarterGui > ArmyGui > ArmyPanel
-    
-    Die komplette Army-Oberfläche in EINEM Script:
-      - GUI öffnen/schließen bei Auswahl
-      - Stats anzeigen
-      - Unit-Slots füllen + Detailansicht beim Klick
-      - BuildCampButton
+
+    Komplette Army-Oberflaeche, jetzt EVENT-GETRIEBEN:
+
+    VORHER (Performance-Probleme):
+      - 0.5s Poll-Loop: Net.Invoke("GetArmy") alle 0.5s, dauerhaft.
+      - N+1 RPC: fuer jeden Unit ein eigenes Net.Invoke("GetUnit").
+      - applyCombatLock spawnte alle 0.5s eine Task.
+
+    JETZT:
+      - Die Daten kommen aus EINEM Modul (ArmyDataCache), das die komplette
+        Army in EINEM Batch-Call (GetArmyDetail) laedt.
+      - Refresh passiert nur bei Auswahl-Wechsel, Server-Push (ArmyStatsChanged)
+        oder Kampfzustands-Aenderung - KEIN Polling.
+      - Der Kampf-Lock hoert auf ein eigenes Event (OnArmyCombatChanged).
+
+    Ablauf:
+      1) ArmyDataCache.OnUpdated -> render(army)
+      2) State.OnChanged (ARMY)  -> oeffnen/schliessen
+      3) State.OnArmyCombatChanged -> Kampf-Lock setzen
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local State = require(ReplicatedStorage:WaitForChild("ClientState"))
+local ArmyDataCache = require(ReplicatedStorage:WaitForChild("ArmyDataCache"))
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
-local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
 
 --------------------------------------------------------------------------------
--- 1) REFERENZEN
+-- 1) GUI-REFERENZEN
 --------------------------------------------------------------------------------
 local gui = script.Parent:IsA("ScreenGui")
 	and script.Parent
@@ -52,10 +64,7 @@ local lblSight   = pick(statFrame, "ArmySightLabel")
 
 local buildBtn = pick(frame, "BuildCampButton")
 
---------------------------------------------------------------------------------
--- NEW (turn based combat): "in combat" indicator + "watch combat" button.
--- Both are created at runtime when they do not exist in the Studio GUI.
---------------------------------------------------------------------------------
+-- "in combat" indicator + "watch combat" button (created at runtime if missing).
 local combatLabel = frame and frame:FindFirstChild("InCombatLabel")
 if frame and not combatLabel then
 	combatLabel = Instance.new("TextLabel")
@@ -88,8 +97,6 @@ if frame and not watchBtn then
 	watchBtn.Parent = frame
 end
 
-local inCombat = false
-
 local unitFrame  = pick(frame, "UnitStatFrame")
 local unitImage  = pick(frame, "HoverUnitImage")
 local uName      = pick(unitFrame, "UnitNameLable")
@@ -107,11 +114,10 @@ for i = 1, MAX_SLOTS do
 	}
 end
 
-local lastSignature = nil
 local shownUnitId = nil
 
 --------------------------------------------------------------------------------
--- 2) FUNKTIONEN
+-- 2) RENDER-HILFEN
 --------------------------------------------------------------------------------
 local function clearSlots()
 	for i = 1, MAX_SLOTS do
@@ -136,63 +142,44 @@ local function clearAll()
 	if lblSight then lblSight.Text = "0 Sight" end
 	clearSlots()
 	clearUnitDetail()
-	lastSignature = nil
 end
 
 local function fillSlots(army)
 	clearSlots()
-	if not army.units then return end
+	if not army or not army.units then return end
 
-	for i, unitId in ipairs(army.units) do
+	for i, unit in ipairs(army.units) do
 		if i > MAX_SLOTS then break end
 		local s = slots[i]
-
-		local ok, unit = Net.Invoke("GetUnit", unitId)
-		if ok and unit then
-			local cfg = UnitConfig.GetUnit(unit.unitType)
-			if cfg then
-				if s.image then s.image.Image = cfg.Icon or "" s.image.Visible = true end
-				if s.name then s.name.Text = cfg.Name or unit.unitType s.name.Visible = true end
-			end
-		end
+		if not s.image and not s.name then continue end
+		if s.image then s.image.Image = unit.icon or "" s.image.Visible = true end
+		if s.name then s.name.Text = unit.name or unit.unitType s.name.Visible = true end
 	end
 end
 
 local function showUnitDetail(unitId)
-	local ok, unit = Net.Invoke("GetUnit", unitId)
-	if not ok or not unit then clearUnitDetail() return end
-
-	local cfg = UnitConfig.GetUnit(unit.unitType)
-	if not cfg or not cfg.Stats then clearUnitDetail() return end
+	local unit = ArmyDataCache.GetUnit(unitId)
+	if not unit then clearUnitDetail() return end
 
 	shownUnitId = unitId
 
 	if unitFrame then unitFrame.Visible = true end
-	if unitImage then unitImage.Image = cfg.Icon or "" unitImage.Visible = true end
-	if uName then uName.Text = cfg.Name or unit.unitType end
-	if uHealth then uHealth.Text = (unit.currentLP or 0) .. "/" .. (unit.maxLP or cfg.Stats.LP) end
-	if uAttack then uAttack.Text = cfg.Stats.Attack .. " Attack" end
-	if uDefense then uDefense.Text = cfg.Stats.Defense .. " Defense" end
-	if uSight then uSight.Text = cfg.Stats.Sight .. " Sight" end
-	if uMovement then
-		uMovement.Text = (unit.currentMovement or 0) .. "/"
-			.. (unit.maxMovement or cfg.Stats.Movement) .. " Move"
-	end
+	if unitImage then unitImage.Image = unit.icon or "" unitImage.Visible = true end
+	if uName then uName.Text = unit.name or unit.unitType end
+	if uHealth then uHealth.Text = unit.currentLP .. "/" .. unit.maxLP end
+	if uAttack then uAttack.Text = unit.attack .. " Attack" end
+	if uDefense then uDefense.Text = unit.defense .. " Defense" end
+	if uSight then uSight.Text = unit.sight .. " Sight" end
+	if uMovement then uMovement.Text = unit.currentMovement .. "/" .. unit.maxMovement .. " Move" end
 end
 
-local function refresh(armyId)
-	if not armyId then return end
-
-	local ok, army = Net.Invoke("GetArmy", armyId)
-	if not ok or not army then return end
-
-	if lblName then lblName.Text = army.name or ("Army " .. armyId) end
-
-	local sig = table.concat(army.units or {}, ",")
-	if sig ~= lastSignature then
-		fillSlots(army)
-		lastSignature = sig
+local function render(army)
+	if not army then
+		clearAll()
+		return
 	end
+
+	if lblName then lblName.Text = army.name or ("Army " .. army.id) end
 
 	local st = army.stats or {}
 	if lblAttack then lblAttack.Text = (st.Attack or 0) .. " Attack" end
@@ -204,44 +191,38 @@ local function refresh(armyId)
 		lblMove.Text = cur .. "/" .. (st.MaxMovement or cur) .. " Move"
 	end
 
+	fillSlots(army)
 	if shownUnitId then showUnitDetail(shownUnitId) end
 end
 
 --------------------------------------------------------------------------------
--- NEW: ask the server whether this army is locked in a combat and lock the
--- action buttons accordingly.
+-- 3) KAMPF-LOCK (event-getrieben)
 --------------------------------------------------------------------------------
-local function applyCombatLock(armyId)
-	-- Local, non blocking lookup. A RemoteFunction call here would spawn a
-	-- new hanging thread every 0.5s poll if the server side is not bound.
-	task.spawn(function()
-		if State.GetId(State.Kind.ARMY) ~= armyId then return end
+local inCombat = false
 
-		inCombat = State.IsArmyInCombat ~= nil and State.IsArmyInCombat(armyId) == true
+local function applyCombatLock()
+	local armyId = State.GetId(State.Kind.ARMY)
+	inCombat = State.IsArmyInCombat ~= nil
+		and State.IsArmyInCombat(armyId or 0)
 
-		if combatLabel then combatLabel.Visible = inCombat end
-		if watchBtn then watchBtn.Visible = inCombat end
-		if buildBtn then
-			-- No camp building while fighting.
-			buildBtn.Active = not inCombat
-			buildBtn.AutoButtonColor = not inCombat
-		end
-	end)
+	if combatLabel then combatLabel.Visible = inCombat end
+	if watchBtn then watchBtn.Visible = inCombat end
+	if buildBtn then
+		-- No camp building while fighting.
+		buildBtn.Active = not inCombat
+		buildBtn.AutoButtonColor = not inCombat
+	end
 end
 
-local function show(armyId)
+--------------------------------------------------------------------------------
+-- 4) OEFFNEN / SCHLIESSEN
+--------------------------------------------------------------------------------
+local function show()
 	gui.Enabled = true
-	if buildBtn then
-		buildBtn.Visible = true
-		buildBtn.Active = true
-		buildBtn.AutoButtonColor = true
-	end
-	if combatLabel then combatLabel.Visible = false end
-	if watchBtn then watchBtn.Visible = false end
-	inCombat = false
-
-	task.spawn(refresh, armyId)
-	applyCombatLock(armyId)
+	-- Combat-Status direkt beim Oeffnen setzen (kein Warten auf Poll).
+	applyCombatLock()
+	-- Daten frisch laden (oder aus Cache), dann rendern.
+	ArmyDataCache.Refresh()
 end
 
 local function hide()
@@ -251,28 +232,40 @@ local function hide()
 end
 
 --------------------------------------------------------------------------------
--- 3) VERBINDUNGEN
+-- 5) VERBINDUNGEN
 --------------------------------------------------------------------------------
+-- Army-Daten sind da (oder Auswahl aufgehoben).
+ArmyDataCache.OnUpdated:Connect(function(army)
+	render(army)
+end)
+
+-- Auswahl: Army -> anzeigen, sonst -> verstecken.
 State.OnChanged:Connect(function(kind, id)
 	if kind == State.Kind.ARMY and id then
-		show(id)
+		show()
 	else
 		hide()
 	end
 end)
 
+-- Kampf-Lock reagiert sofort, ohne Polling.
+if State.OnArmyCombatChanged then
+	State.OnArmyCombatChanged:Connect(function(armyId)
+		if State.GetId(State.Kind.ARMY) == armyId then
+			applyCombatLock()
+		end
+	end)
+end
+
+-- Unit-Kacheln: Klick -> Detailansicht.
 for i = 1, MAX_SLOTS do
 	local btn = slots[i].image
 	if btn and (btn:IsA("ImageButton") or btn:IsA("TextButton")) then
 		btn.MouseButton1Click:Connect(function()
-			local armyId = State.GetId(State.Kind.ARMY)
-			if not armyId then return end
-
-			local ok, army = Net.Invoke("GetArmy", armyId)
-			if not ok or not army or not army.units then return end
-			if i > #army.units then return end
-
-			showUnitDetail(army.units[i])
+			local army = ArmyDataCache.Get()
+			if not army or not army.units then return end
+			local unit = army.units[i]
+			if unit then showUnitDetail(unit.id) end
 		end)
 	end
 end
@@ -307,20 +300,14 @@ else
 	warn("[ArmyPanel] BuildCampButton fehlt in MainframeArmy")
 end
 
-task.spawn(function()
-	while true do
-		task.wait(0.5)
-		if gui.Enabled then
-			local armyId = State.GetId(State.Kind.ARMY)
-			if armyId then
-				refresh(armyId)
-				applyCombatLock(armyId)
-			end
-		end
-	end
-end)
-
+--------------------------------------------------------------------------------
+-- 6) BOOT
+--------------------------------------------------------------------------------
 local kind, id = State.Get()
-if kind == State.Kind.ARMY and id then show(id) else hide() end
+if kind == State.Kind.ARMY and id then
+	show()
+else
+	hide()
+end
 
-print("[ArmyPanel] Bereit.")
+print("[ArmyPanel] Bereit (event-driven).")

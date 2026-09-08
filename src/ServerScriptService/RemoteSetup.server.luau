@@ -61,10 +61,12 @@ ensure(dataRemotes, "RemoteFunction", "GetUnitStats")
 ensure(dataRemotes, "RemoteFunction", "GetUnitConfig")
 
 ensure(dataRemotes, "RemoteFunction", "GetArmy")
+ensure(dataRemotes, "RemoteFunction", "GetArmyDetail")
 ensure(dataRemotes, "RemoteFunction", "GetArmiesByOwner")
 ensure(dataRemotes, "RemoteFunction", "GetArmyOnHex")
 ensure(dataRemotes, "RemoteFunction", "GetArmyCount")
 ensure(dataRemotes, "RemoteFunction", "GetArmyOwner")
+ensure(dataRemotes, "RemoteEvent", "ArmyStatsChanged")
 
 ensure(dataRemotes, "RemoteFunction", "GetCamp")
 ensure(dataRemotes, "RemoteFunction", "GetCampOnHex")

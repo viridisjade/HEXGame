@@ -33,6 +33,7 @@ local CityData = require(script.Parent:WaitForChild("CityData"))
 local BuildingCostSystem = require(script.Parent:WaitForChild("BuildingCostSystem"))
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -58,6 +59,46 @@ local function getArmyOwner(player, armyId)
 	local army = ArmyData.GetArmy(armyId)
 	if not army then return false end
 	return army.owner == player
+end
+
+-- Kompletter Army-Snapshot in EINEM Call fuer die ArmyGui.
+-- Ersetzt das alte Muster "1x GetArmy + Nx GetUnit" (N+1 RPC-Problem).
+-- Liefert die Army inkl. aufgeloester Units (Stat-Config + aktuelle Werte).
+local function getArmyDetail(player, armyId)
+	local army = ArmyData.GetArmy(armyId)
+	if not army then return nil end
+
+	local units = {}
+	for _, unitId in ipairs(army.units or {}) do
+		local unit = UnitData.GetUnit(unitId)
+		if unit then
+			local cfg = UnitConfig.GetUnit(unit.unitType)
+			table.insert(units, {
+				id = unit.id,
+				unitType = unit.unitType,
+				name = cfg and cfg.Name or unit.unitType,
+				icon = cfg and cfg.Icon or "",
+				currentLP = unit.currentLP or 0,
+				maxLP = unit.maxLP or (cfg and cfg.Stats and cfg.Stats.LP) or 0,
+				attack = unit.attack or (cfg and cfg.Stats and cfg.Stats.Attack) or 0,
+				defense = unit.defense or (cfg and cfg.Stats and cfg.Stats.Defense) or 0,
+				sight = (cfg and cfg.Stats and cfg.Stats.Sight) or 0,
+				currentMovement = unit.currentMovement or 0,
+				maxMovement = unit.maxMovement or (cfg and cfg.Stats and cfg.Stats.Movement) or 0,
+				alive = unit.alive == true,
+			})
+		end
+	end
+
+	return {
+		id = army.id,
+		name = army.name,
+		q = army.q,
+		r = army.r,
+		ownerName = army.owner and army.owner.Name or nil,
+		stats = army.stats,
+		units = units,
+	}
 end
 
 -- Statistiken fürs Empire-Overlay
@@ -165,6 +206,7 @@ local QUERIES = {
 
 	-- ARMEEN
 	GetArmy             = drop(ArmyData.GetArmy),
+	GetArmyDetail       = getArmyDetail,         -- Batch-Snapshot fuer die ArmyGui
 	GetArmiesByOwner    = drop(ArmyData.GetArmiesByOwner),
 	GetArmyOnHex        = drop(ArmyData.GetArmyOnHex),
 	GetArmyCount        = drop(ArmyData.GetArmyCount),

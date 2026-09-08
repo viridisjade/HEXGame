@@ -26,6 +26,23 @@ local BuildingSystem = require(script.Parent:WaitForChild("BuildingSystem"))
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
 --------------------------------------------------------------------------------
+-- ArmyStatsNotifier (analog zu _G.NotifyCityStatsChanged)
+--
+-- Feuert ArmyStatsChanged an den Besitzer, wenn sich eine Army geaendert hat
+-- (Kampf, Bewegung, Runde, Einheiten hinzugefuegt/entfernt, Kampfbeginn/-ende).
+-- Aufrufbar ueber _G.NotifyArmyStatsChanged(armyId) aus jedem Server-Script.
+-- Der Client filtert selbst ob diese Army gerade ausgewaehlt ist.
+--------------------------------------------------------------------------------
+local armyStatsChangedRemote = dataRemotes:FindFirstChild("ArmyStatsChanged")
+
+_G.NotifyArmyStatsChanged = function(armyId)
+	if not armyStatsChangedRemote then return end
+	local army = ArmyData.GetArmy(armyId)
+	if not army or not army.owner then return end
+	armyStatsChangedRemote:FireClient(army.owner, armyId)
+end
+
+--------------------------------------------------------------------------------
 -- Hilfsfunktionen
 --------------------------------------------------------------------------------
 local function onEvent(name, handler)

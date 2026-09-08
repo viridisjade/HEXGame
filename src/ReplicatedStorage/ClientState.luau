@@ -132,12 +132,23 @@ end
 local ARMY_COMBAT_TTL = 120 -- seconds
 local armiesInCombat = {}   -- [armyId] = os.clock() timestamp
 
+-- Per-Army combat flags fire this event so UI (ArmyGui) can react without
+-- polling. Fired with (armyId, active).
+local armyCombatEvent = Instance.new("BindableEvent")
+ClientState.OnArmyCombatChanged = armyCombatEvent.Event
+
 function ClientState.SetArmyCombat(armyId, active)
 	if type(armyId) ~= "number" then return end
+	local wasActive = ClientState.IsArmyInCombat(armyId)
 	if active then
 		armiesInCombat[armyId] = os.clock()
 	else
 		armiesInCombat[armyId] = nil
+	end
+	-- Only fire when the flag actually changed (avoids redundant UI work).
+	local nowActive = ClientState.IsArmyInCombat(armyId)
+	if nowActive ~= wasActive then
+		armyCombatEvent:Fire(armyId, nowActive)
 	end
 end
 
@@ -146,6 +157,8 @@ function ClientState.IsArmyInCombat(armyId)
 	if not stamp then return false end
 	if os.clock() - stamp > ARMY_COMBAT_TTL then
 		armiesInCombat[armyId] = nil -- safety net against a stale flag
+		-- Notify the UI that the TTL expired.
+		armyCombatEvent:Fire(armyId, false)
 		return false
 	end
 	return true
