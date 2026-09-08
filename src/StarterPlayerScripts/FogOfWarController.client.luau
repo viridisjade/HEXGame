@@ -286,25 +286,57 @@ local function applyHexByKey(key)
 	setHexState(key, state)
 end
 
+--------------------------------------------------------------------------------
+-- GEBÄUDE NACHBEWERTEN (alle, auch Ghost_
+--------------------------------------------------------------------------------
+-- setHexState() wird nur fuer explored/visible Hexes aufgerufen. Gebaeude in
+-- unerforschten Hexes (stateByKey leer -> UNEXPLORED) muessen aber ebenfalls
+-- unsichtbar bleiben. Dieser Sweep wendet den (ggf. Standard-)Zustand auf ALLE
+-- Gebaeude im Buildings-Ordner an - auch auf solche, die beim Initial-Hide noch
+-- nicht existierten oder von einem vorbefuellten Ordner nicht erfasst wurden.
+local function refreshBuildings()
+	if not buildingsFolder then
+		refreshFolders()
+		if not buildingsFolder then return end
+	end
+	if not hexMapFolder then return end
+	for _, building in ipairs(buildingsFolder:GetChildren()) do
+		local key = buildingKeyFromName(building.Name)
+		if key then
+			local state = stateByKey[key] or FogOfWarConfig.STATE.UNEXPLORED
+			if state == FogOfWarConfig.STATE.VISIBLE then
+				setModelVisibility(building, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
+			elseif state == FogOfWarConfig.STATE.EXPLORED then
+				setModelVisibility(building, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
+			else
+				setModelVisibility(building, false, 1)
+			end
+		end
+	end
+end
+
 local function connectBuildingsWatcher(buildingFolder)
 	if not buildingFolder then return end
+	buildingsFolder = buildingFolder
 	buildingFolder.ChildAdded:Connect(function(child)
 		if not child then return end
-		-- Baustellen (Ghost_) sollen mit dem Fog behandelt werden; aber wir
-		-- ignorieren sie hier, weil sie beim Fertigstellen ersetzt werden.
-		if child.Name:match("^Ghost_") then return end
 		local key = buildingKeyFromName(child.Name)
 		if key then
 			applyHexByKey(key)
 		end
 	end)
+	-- Bestehende Gebaeude (inkl. Ghost_) sofort nachziehen.
+	pcall(refreshBuildings)
 end
 
 local function connectArmyWatcher(armyFolder)
 	if not armyFolder then return end
+	armyModelsFolder = armyFolder
 	armyFolder.ChildAdded:Connect(function(child)
 		if child then pcall(refreshArmies) end
 	end)
+	-- Bestehende Armee-Modelle sofort nachziehen.
+	pcall(refreshArmies)
 end
 
 local function setupHexMapWatchers()
@@ -402,6 +434,7 @@ local function applyVisionDelta(data)
 
 	-- Armee-Modelle nach dem Delta neu bewerten (nie naeher als noetig).
 	refreshArmies()
+	refreshBuildings()
 end
 
 --------------------------------------------------------------------------------
@@ -421,6 +454,7 @@ local function applyFullVision(data)
 
 	FogOfWarController.MarkReady()
 	refreshArmies()
+	refreshBuildings()
 end
 
 --------------------------------------------------------------------------------
@@ -475,8 +509,11 @@ end)
 task.spawn(function()
 	while true do
 		task.wait(0.4)
-		if armyModelsFolder then
+		-- Armee- und Gebaeude-Modelle nachziehen, damit neue/veraenderte Modelle
+		-- (auch gegnerische) im unerforschten Gebiet sofort unsichtbar werden.
+		if armyModelsFolder or buildingsFolder then
 			pcall(refreshArmies)
+			pcall(refreshBuildings)
 		end
 	end
 end)
