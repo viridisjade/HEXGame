@@ -142,6 +142,16 @@ function ArmySpawner.placeArmyModel(armyId, q, r)
 
 	model.Name = "Army_" .. armyId
 
+	-- Owner-Info als Attribut setzen, damit der FogOfWarController (Client)
+	-- eigene Armeen immer sichtbar halten und feindliche nach Sichtfeld blenden
+	-- kann.
+	local army = ArmyData.GetArmy(armyId)
+	if army and army.owner then
+		model:SetAttribute("OwnerUserId", army.owner.UserId)
+	else
+		model:SetAttribute("OwnerUserId", nil)
+	end
+
 	-- ZUERST in Workspace packen (GetBoundingBox / GetPivot brauchen Parent)
 	local folder = ArmySpawner.getArmyModelsFolder()
 	model.Parent = folder

@@ -25,6 +25,11 @@ local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local HexGridConfig = require(ReplicatedStorage:WaitForChild("HexGridConfig"))
 local FogOfWarConfig = require(ReplicatedStorage:WaitForChild("FogOfWarConfig"))
 
+local Players = game:GetService("Players")
+-- Eigene Armen identifizieren: Armee-Modelle tragen ein OwnerUserId-Attribut
+-- (vom Server gesetzt). Eigene Armeen sollen IMMER sichtbar sein.
+local localUserId = Players.LocalPlayer and Players.LocalPlayer.UserId
+
 -- Lebenszeichen: Wenn dieser Print NICHT erscheint, lädt das LocalScript nicht
 -- (dann liegt es an der Rojo-Zuordnung, nicht an der Fog-Logik).
 print("[FogOfWarController] geladen (LocalScript läuft)")
@@ -93,6 +98,29 @@ local function setModelVisibility(model, visible, transparency)
 		elseif part:IsA("Decal") or part:IsA("Texture") then
 			part.Transparency = target
 		end
+	end
+end
+
+--------------------------------------------------------------------------------
+-- ARMY-VISIBILITY (Owner-bewusst)
+--------------------------------------------------------------------------------
+-- Eigene Armeen (OwnerUserId-Attribut == LocalPlayer.UserId) sind IMMER
+-- sichtbar. Feindliche Armeen werden nach dem Hex-Zustand geblendet:
+--   - visible    -> sichtbar (Transparency 0)
+--   - explored   -> unsichtbar (Transparency 1) - erkundet zeigt KEINE Units
+--   - unexplored -> unsichtbar (Transparency 1)
+local function applyArmyVisibility(model, state)
+	if not model then return end
+	local ownerId = model:GetAttribute and model:GetAttribute("OwnerUserId")
+	if ownerId and ownerId == localUserId then
+		-- Eigene Armee: immer sichtbar.
+		setModelVisibility(model, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
+		return
+	end
+	if state == FogOfWarConfig.STATE.VISIBLE then
+		setModelVisibility(model, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
+	else
+		setModelVisibility(model, false, 1)
 	end
 end
 
@@ -201,9 +229,9 @@ local function setHexState(key, state)
 		-- ProvinceHexes sind Farb-Overlays ueber dem Terrain: IMMER 50% transparent,
 		-- damit die Provinzfarbe UND das Terrain darunter sichtbar bleiben.
 		setModelVisibility(provinceModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		-- Units sichtbar.
+		-- Units sichtbar (eigene immer, feindliche wenn im Sichtfeld).
 		for _, army in ipairs(armies) do
-			setModelVisibility(army, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
+			applyArmyVisibility(army, state)
 		end
 
 	elseif state == "explored" then
@@ -212,9 +240,9 @@ local function setHexState(key, state)
 		setModelVisibility(building, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
 		-- ProvinceHexes: auch erkundet 50% transparent.
 		setModelVisibility(provinceModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		-- Units UNSICHTBAR.
+		-- Units: eigene sichtbar, feindliche UNSICHTBAR.
 		for _, army in ipairs(armies) do
-			setModelVisibility(army, false, 1)
+			applyArmyVisibility(army, state)
 		end
 
 	elseif state == "unexplored" then
@@ -223,7 +251,7 @@ local function setHexState(key, state)
 		setModelVisibility(building, false, 1)
 		setModelVisibility(provinceModel, false, 1)
 		for _, army in ipairs(armies) do
-			setModelVisibility(army, false, 1)
+			applyArmyVisibility(army, state)
 		end
 	end
 end
@@ -236,14 +264,6 @@ end
 -- umgerechnet und mit dem gecachten Hex-Zustand abgeglichen. So erscheinen und
 -- verschwinden Heere sofort, wenn sie das (eigene) Sichtfeld betreten/verlassen -
 -- auch ohne dass sich der Hex-Zustand dabei aendert.
-local function applyArmyVisibility(model, state)
-	if state == FogOfWarConfig.STATE.VISIBLE then
-		setModelVisibility(model, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-	else
-		setModelVisibility(model, false, 1)
-	end
-end
-
 local function refreshArmies()
 	if not armyModelsFolder then
 		refreshFolders()
