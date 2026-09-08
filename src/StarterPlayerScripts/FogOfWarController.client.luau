@@ -2,40 +2,42 @@
     FogOfWarController (LocalScript)
     Ort: StarterPlayer > StarterPlayerScripts > FogOfWarController
 
-    Client-Seite des Fog-of-War-Systems. Empfängt FogOfWarInit (voller State
-    beim Join) und FogOfWarUpdate (Deltas nach Bewegung/Bau/Kampf) und wendet
-    die Sicht-Zustände auf die Hex-Modelle im Workspace an.
+    Client-Seite des Fog-of-War-Systems (KOMPLETTER REWRITE).
 
-    ZUSTÄNDE (siehe FogOfWarConfig.STATE):
-        unexplored - alles unsichtbar
-        explored   - Terrain/Gebäude 50% transparent, KEINE Units
-        visible    - alles voll, Units sichtbar
+    Empfaengt FogOfWarInit (voller State beim Join) und FogOfWarUpdate
+    (Deltas nach Bewegung/Bau/Kampf) und blendet die Modelle der Welt
+    entsprechend dem Sicht-Zustand des Spielers.
 
-    Modell-Lookup (workspace/HexMap):
-        Hex-Modell   : <TerrainFolder>/Hex_q_r
-        Soil-Modell  : Soils/<soilFolder>/Soil_q_r_<index>
-        Gebäude      : Buildings/<Type>_q_r  (Ghost_ ausgenommen)
-        Province     : ProvinceVisuals/Hex_q_r
-        Armee-Modell : ArmyModels/Army_<id>
+    ZUSTAENDE (siehe FogOfWarConfig.STATE):
+        unexplored  -> alles Transparency = 1 (unsichtbar)
+        explored    -> Terrain/Soil/Gebaeude/Province = 0.5, KEINE Units
+        visible     -> Terrain/Soil/Gebaeude = 0, Province = 0.5, Units = 0
+
+    REGELN:
+        - BaseParts/MeshParts/Union haben KEIN .Visible - es wird NUR
+          Transparency verwendet (0 = sichtbar, 0.5 = erkundet, 1 = unsichtbar).
+        - Armee-Modelle liegen in ArmyModels, bewegen sich und sind NICHT
+          fest an ein Hex gebunden -> werden separat ueber Position behandelt.
+        - Eigene Armeen (OwnerUserId-Attribut == LocalPlayer.UserId) sind
+          IMMER sichtbar; feindliche nur, wenn ihr Hex im Sichtfeld liegt.
+        - Gebaeude werden ueber den Namen (<Type>_q_r) -> Hex-Key gefunden.
+        - Initialisierung versteckt ALLES; das erste FogOfWarInit (voller
+          State) ist autoritativ und deckt sichtbare/erkundete Felder auf.
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local HexGridConfig = require(ReplicatedStorage:WaitForChild("HexGridConfig"))
 local FogOfWarConfig = require(ReplicatedStorage:WaitForChild("FogOfWarConfig"))
 
-local Players = game:GetService("Players")
--- Eigene Armen identifizieren: Armee-Modelle tragen ein OwnerUserId-Attribut
--- (vom Server gesetzt). Eigene Armeen sollen IMMER sichtbar sein.
-local localUserId = Players.LocalPlayer and Players.LocalPlayer.UserId
-
--- Lebenszeichen: Wenn dieser Print NICHT erscheint, lädt das LocalScript nicht
--- (dann liegt es an der Rojo-Zuordnung, nicht an der Fog-Logik).
-print("[FogOfWarController] geladen (LocalScript läuft)")
+-- Lebenszeichen: Wenn dieser Print NICHT erscheint, laedt das LocalScript
+-- nicht (dann liegt es an der Rojo-Zuordnung, nicht an der Fog-Logik).
+print("[FogOfWarController] geladen (LocalScript laeuft)")
 
 --------------------------------------------------------------------------------
--- STATE + CACHES
+-- STATE + FOLDER-REFERENZEN
 --------------------------------------------------------------------------------
 local hexMapFolder = nil
 local soilsFolder = nil
@@ -43,15 +45,22 @@ local buildingsFolder = nil
 local provinceFolder = nil
 local armyModelsFolder = nil
 
--- Cache des zuletzt angewandten Zustands pro Hex-Key. Wird von setHexState
--- gepflegt und von refreshArmies() benutzt, um Armee-Modelle unabhaengig von
--- einem Hex-Zustandswechsel korrekt zu blenden (z.B. wenn ein gegnerisches
--- Heer sich in das Sichtfeld bewegt oder dieses verlässt).
-local stateByKey = {}
+-- Autoritative Mengen. visible = was der Spieler JETZT sieht (Units sichtbar).
+-- explored = was er je erkundet hat (permanent, 50% transparent).
+local visibleSet = {}   -- [key] = true
+local exploredSet = {}  -- [key] = true
 
 local SPECIAL_FOLDERS = {
 	Soils = true, Buildings = true, ArmyModels = true, ProvinceVisuals = true,
 }
+
+--------------------------------------------------------------------------------
+-- HILFSFUNKTIONEN
+--------------------------------------------------------------------------------
+local function myUserId()
+	local lp = Players.LocalPlayer
+	return lp and lp.UserId
+end
 
 local function refreshFolders()
 	hexMapFolder = workspace:FindFirstChild("HexMap")
@@ -65,72 +74,43 @@ local function refreshFolders()
 	armyModelsFolder = hexMapFolder:FindFirstChild("ArmyModels")
 end
 
---------------------------------------------------------------------------------
--- SET MODEL VISIBILITY (nur Transferenz - BaseParts haben KEIN Visible!)
---------------------------------------------------------------------------------
--- Roblox-BaseParts (Part, MeshPart, Union, WedgePen) besitzen KEIN Visible-
--- Property. Sichtbarkeit wird ausschliesslich über Transparency gesteuert:
---   0 = sichtbar / normal, 0.5 = erkundet, 1 = komplett unsichtbar.
--- Auch Models haben KEIN Visible - die Sichtbarkeit ergibt sich aus der
--- Transparenz ihrer BasePart-Descendants.
-local function setModelVisibility(model, visible, transparency)
-	if not model then return end
-	-- visible=true -> gewuenschte Transparenz (Default 0 = sichtbar);
-	-- visible=false -> 1 (komplett unsichtbar).
-	local target = visible and (transparency or 0) or 1
+local function keyToCoord(key)
+	local q, r = string.match(key, "^(%-?%d+)_(%-?%d+)$")
+	if not q or not r then return nil, nil end
+	return tonumber(q), tonumber(r)
+end
 
-	-- Falls das Objekt selbst ein BasePart ist (z.B. einzelnes Hex).
+-- Zustand eines Hex-Keys aus den autoritativen Mengen ableiten.
+local function getState(key)
+	if visibleSet[key] then
+		return FogOfWarConfig.STATE.VISIBLE
+	elseif exploredSet[key] then
+		return FogOfWarConfig.STATE.EXPLORED
+	end
+	return FogOfWarConfig.STATE.UNEXPLORED
+end
+
+--------------------------------------------------------------------------------
+-- TRANSPARENZ SETZEN (sicher, KEIN .Visible auf BaseParts!)
+--------------------------------------------------------------------------------
+local function applyTransparency(model, t)
+	if not model then return end
 	if model:IsA("BasePart") then
-		model.Transparency = target
-		-- Decals/Texturen am Part ebenfalls mitziehen.
-		for _, child in ipairs(model:GetDescendants()) do
-			if child:IsA("Decal") or child:IsA("Texture") then
-				child.Transparency = target
-			end
-		end
-		return
+		model.Transparency = t
 	end
-
-	-- Für Models: alle BaseParts + Decals/Texturen.
-	for _, part in ipairs(model:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.Transparency = target
-		elseif part:IsA("Decal") or part:IsA("Texture") then
-			part.Transparency = target
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") or d:IsA("Decal") or d:IsA("Texture") then
+			d.Transparency = t
 		end
 	end
 end
 
 --------------------------------------------------------------------------------
--- ARMY-VISIBILITY (Owner-bewusst)
+-- MODELL-LOOKUP (pro Hex)
 --------------------------------------------------------------------------------
--- Eigene Armeen (OwnerUserId-Attribut == LocalPlayer.UserId) sind IMMER
--- sichtbar. Feindliche Armeen werden nach dem Hex-Zustand geblendet:
---   - visible    -> sichtbar (Transparency 0)
---   - explored   -> unsichtbar (Transparency 1) - erkundet zeigt KEINE Units
---   - unexplored -> unsichtbar (Transparency 1)
-local function applyArmyVisibility(model, state)
-	if not model then return end
-	local ownerId = model:GetAttribute and model:GetAttribute("OwnerUserId")
-	if ownerId and ownerId == localUserId then
-		-- Eigene Armee: immer sichtbar.
-		setModelVisibility(model, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-		return
-	end
-	if state == FogOfWarConfig.STATE.VISIBLE then
-		setModelVisibility(model, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-	else
-		setModelVisibility(model, false, 1)
-	end
-end
-
---------------------------------------------------------------------------------
--- MODELL-LOOKUP
---------------------------------------------------------------------------------
-local function findHexModel(q, r)
+local function findTerrainModel(q, r)
 	if not hexMapFolder then return nil end
 	local name = "Hex_" .. q .. "_" .. r
-	-- Hex-Modelle liegen in Terrain-Ordnern (Nicht-Spezial-Folders).
 	for _, child in ipairs(hexMapFolder:GetChildren()) do
 		if child:IsA("Folder") and not SPECIAL_FOLDERS[child.Name] then
 			local hex = child:FindFirstChild(name)
@@ -167,8 +147,7 @@ end
 local function findProvinceModel(q, r)
 	if not provinceFolder then return nil end
 	local name = "Hex_" .. q .. "_" .. r
-	-- Provinz-Hexes liegen gruppiert unter Province_<id> Modellen, NICHT direkt
-	-- im ProvinceVisuals-Ordner. Suche deshalb in jedem Province_-Modell.
+	-- Provinz-Hexes liegen gruppiert unter Province_<id> Modellen.
 	for _, provinceModel in ipairs(provinceFolder:GetChildren()) do
 		if provinceModel:IsA("Model") or provinceModel:IsA("Folder") then
 			local hex = provinceModel:FindFirstChild(name)
@@ -178,192 +157,188 @@ local function findProvinceModel(q, r)
 	return nil
 end
 
-local function findArmiesOnHex(q, r)
-	if not armyModelsFolder then return {} end
-	local result = {}
-	local targetWorld = HexGridConfig.axialToWorld(q, r)
-	for _, model in ipairs(armyModelsFolder:GetChildren()) do
-		if model:IsA("Model") or model:IsA("BasePart") then
-			local pos = model:IsA("Model") and model.PrimaryPart and model.PrimaryPart.Position
-				or (model:IsA("BasePart") and model.Position or nil)
-			if pos then
-				local aq, ar = HexGridConfig.worldToAxial(pos)
-				if aq == q and ar == r then
-					table.insert(result, model)
-				end
-			end
-		end
-	end
-	return result
-end
-
 --------------------------------------------------------------------------------
--- SET HEX STATE (Kernanwendung auf ein einzelnes Feld)
+-- HEX-STATE ANWENDEN
 --------------------------------------------------------------------------------
--- state: "visible" | "explored" | (optional "unexplored", versteckt alles)
 local function setHexState(key, state)
-	local q, r = string.match(key, "^(%-?%d+)_(%-?%d+)$")
-	if not q or not r then return end
-	q = tonumber(q); r = tonumber(r)
+	local q, r = keyToCoord(key)
+	if not q then return end
 
-	-- Zustand fuer spaetere Armee-Bewertung merken.
-	stateByKey[key] = state
-
-	local hexModel = findHexModel(q, r)
-	local soilModel = findSoilModel(q, r)
-	local building = findBuilding(q, r)
-	local provinceModel = findProvinceModel(q, r)
-	local armies = findArmiesOnHex(q, r)
-
-	-- Diagnose beim EINBLENDEN (visible): zeigt ob die Modelle gefunden werden.
+	local t = 1            -- unexplored: alles unsichtbar
+	local provinceT = 1
 	if state == FogOfWarConfig.STATE.VISIBLE then
-		print(("[FogOfWar] setHex %s -> visible | hex=%s soil=%s bld=%s prov=%s armies=%d")
-			:format(key, tostring(hexModel ~= nil), tostring(soilModel ~= nil),
-				tostring(building ~= nil), tostring(provinceModel ~= nil), #armies))
+		t = 0              -- sichtbar: voll
+		provinceT = 0.5    -- ProvinceHex bleibt halb transparent
+	elseif state == FogOfWarConfig.STATE.EXPLORED then
+		t = 0.5            -- erkundet: Geister-Look
+		provinceT = 0.5
 	end
 
-	if state == "visible" then
-		setModelVisibility(hexModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-		setModelVisibility(soilModel, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-		setModelVisibility(building, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-		-- ProvinceHexes sind Farb-Overlays ueber dem Terrain: IMMER 50% transparent,
-		-- damit die Provinzfarbe UND das Terrain darunter sichtbar bleiben.
-		setModelVisibility(provinceModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		-- Units sichtbar (eigene immer, feindliche wenn im Sichtfeld).
-		for _, army in ipairs(armies) do
-			applyArmyVisibility(army, state)
-		end
-
-	elseif state == "explored" then
-		setModelVisibility(hexModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		setModelVisibility(soilModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		setModelVisibility(building, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		-- ProvinceHexes: auch erkundet 50% transparent.
-		setModelVisibility(provinceModel, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-		-- Units: eigene sichtbar, feindliche UNSICHTBAR.
-		for _, army in ipairs(armies) do
-			applyArmyVisibility(army, state)
-		end
-
-	elseif state == "unexplored" then
-		setModelVisibility(hexModel, false, 1)
-		setModelVisibility(soilModel, false, 1)
-		setModelVisibility(building, false, 1)
-		setModelVisibility(provinceModel, false, 1)
-		for _, army in ipairs(armies) do
-			applyArmyVisibility(army, state)
-		end
-	end
+	applyTransparency(findTerrainModel(q, r), t)
+	applyTransparency(findSoilModel(q, r), t)
+	applyTransparency(findBuilding(q, r), t)
+	applyTransparency(findProvinceModel(q, r), provinceT)
 end
 
 --------------------------------------------------------------------------------
--- ARMY-REFRESH (Position gegen Hex-Zustand)
+-- ARMEEN AKTUALISIEREN (separiert - sie bewegen sich!)
 --------------------------------------------------------------------------------
--- Armee-Modelle tragen keinen Hex-Key im Namen und bewegen sich unabhaengig.
--- Deshalb wird hier die aktuelle Position jedes Armee-Modells in Axial-Koordinaten
--- umgerechnet und mit dem gecachten Hex-Zustand abgeglichen. So erscheinen und
--- verschwinden Heere sofort, wenn sie das (eigene) Sichtfeld betreten/verlassen -
--- auch ohne dass sich der Hex-Zustand dabei aendert.
-local function refreshArmies()
-	if not armyModelsFolder then
-		refreshFolders()
-		if not armyModelsFolder then return end
-	end
-	-- Falls die HexMap noch fehlt, abbrechen.
-	if not hexMapFolder then return end
+-- Eigene Armeen (OwnerUserId) IMMER sichtbar; feindliche nur wenn ihr Hex im
+-- visible-Set liegt. Erkundete/unerforschte Gebiete zeigen KEINE feindlichen Units.
+local function updateArmyVisibility()
+	refreshFolders()
+	if not armyModelsFolder then return end
+
+	local uid = myUserId()
+	local visibleCount = 0
+	local hiddenCount = 0
 
 	for _, model in ipairs(armyModelsFolder:GetChildren()) do
 		if model:IsA("Model") or model:IsA("BasePart") then
-			local pos = model:IsA("Model") and model.PrimaryPart and model.PrimaryPart.Position
-				or (model:IsA("BasePart") and model.Position or nil)
+			local pos
+			if model:IsA("BasePart") then
+				pos = model.Position
+			elseif model.PrimaryPart then
+				pos = model.PrimaryPart.Position
+			else
+				local ok, cf = pcall(function() return model:GetPivot() end)
+				if ok and cf then pos = cf.Position end
+			end
+
 			if pos then
 				local aq, ar = HexGridConfig.worldToAxial(pos)
 				local key = aq .. "_" .. ar
-				local state = stateByKey[key] or FogOfWarConfig.STATE.UNEXPLORED
-				applyArmyVisibility(model, state)
+				local ownerId = model:GetAttribute("OwnerUserId")
+
+				local t = 1
+				if ownerId and uid and ownerId == uid then
+					t = 0          -- eigene Armee: IMMER sichtbar
+				elseif visibleSet[key] then
+					t = 0          -- feindliche Armee im Sichtfeld
+				end
+
+				applyTransparency(model, t)
+				if t == 0 then visibleCount = visibleCount + 1 else hiddenCount = hiddenCount + 1 end
 			end
 		end
 	end
+
+	print(("[Fog] Armeen: %d sichtbar, %d unsichtbar"):format(visibleCount, hiddenCount))
 end
 
 --------------------------------------------------------------------------------
--- NEU AUFTAUCHENDE MODELLE (Gebäude, Armeen) NACHBEWERTEN
+-- GEBÄUDE NACHBEWERTEN (alle, ueber Hex-Key)
 --------------------------------------------------------------------------------
--- Neue Modelle (z.B. von Gegnern gebaute Gebäude) werden vom Server auf allen
--- Clients sichtbar erzeugt. Wenn ihr Hex keinen Zustandswechsel auslöst (weil es
--- schon erkundet/sichtbar war), bleibt das neue Modell sonst fälschlich sichtbar.
--- Hiermit wenden wir den Hex-Zustand sofort an.
 local function buildingKeyFromName(name)
 	if not name then return nil end
+	if name:match("^Ghost_") then return nil end
 	local q, r = string.match(name, "_(%-?%d+)_(%-?%d+)$")
 	if q and r then return q .. "_" .. r end
 	return nil
 end
 
-local function applyHexByKey(key)
-	if not key then return end
-	local state = stateByKey[key] or FogOfWarConfig.STATE.UNEXPLORED
-	setHexState(key, state)
-end
-
---------------------------------------------------------------------------------
--- GEBÄUDE NACHBEWERTEN (alle, auch Ghost_
---------------------------------------------------------------------------------
--- setHexState() wird nur fuer explored/visible Hexes aufgerufen. Gebaeude in
--- unerforschten Hexes (stateByKey leer -> UNEXPLORED) muessen aber ebenfalls
--- unsichtbar bleiben. Dieser Sweep wendet den (ggf. Standard-)Zustand auf ALLE
--- Gebaeude im Buildings-Ordner an - auch auf solche, die beim Initial-Hide noch
--- nicht existierten oder von einem vorbefuellten Ordner nicht erfasst wurden.
 local function refreshBuildings()
-	if not buildingsFolder then
-		refreshFolders()
-		if not buildingsFolder then return end
-	end
-	if not hexMapFolder then return end
+	refreshFolders()
+	if not buildingsFolder then return end
 	for _, building in ipairs(buildingsFolder:GetChildren()) do
 		local key = buildingKeyFromName(building.Name)
 		if key then
-			local state = stateByKey[key] or FogOfWarConfig.STATE.UNEXPLORED
-			if state == FogOfWarConfig.STATE.VISIBLE then
-				setModelVisibility(building, true, FogOfWarConfig.VISIBLE_TRANSPARENCY)
-			elseif state == FogOfWarConfig.STATE.EXPLORED then
-				setModelVisibility(building, true, FogOfWarConfig.EXPLORED_TRANSPARENCY)
-			else
-				setModelVisibility(building, false, 1)
-			end
+			setHexState(key, getState(key))
 		end
 	end
 end
 
-local function connectBuildingsWatcher(buildingFolder)
-	if not buildingFolder then return end
-	buildingsFolder = buildingFolder
-	buildingFolder.ChildAdded:Connect(function(child)
+--------------------------------------------------------------------------------
+-- ALLES UNSICHTBAR (Initialisierung)
+--------------------------------------------------------------------------------
+local function hideEverything()
+	refreshFolders()
+	if not hexMapFolder then return end
+	for _, child in ipairs(hexMapFolder:GetChildren()) do
+		applyTransparency(child, 1)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- VOLLER STATE ANWENDEN (beim Init - autoritativ)
+--------------------------------------------------------------------------------
+local function applyFullVision(data)
+	refreshFolders()
+
+	-- Mengen neu aufbauen.
+	visibleSet = {}
+	exploredSet = {}
+	for _, key in ipairs(data.visible or {}) do visibleSet[key] = true end
+	for _, key in ipairs(data.explored or {}) do exploredSet[key] = true end
+
+	-- Erst ALLES verstecken, dann sichtbare/erkundete Felder auflisten.
+	hideEverything()
+	for _, key in ipairs(data.explored or {}) do setHexState(key, FogOfWarConfig.STATE.EXPLORED) end
+	for _, key in ipairs(data.visible or {}) do setHexState(key, FogOfWarConfig.STATE.VISIBLE) end
+
+	updateArmyVisibility()
+	refreshBuildings()
+
+	print(("[Fog] Init: %d sichtbar, %d erkundet")
+		:format(#(data.visible or {}), #(data.explored or {})))
+end
+
+--------------------------------------------------------------------------------
+-- DELTA ANWENDEN
+--------------------------------------------------------------------------------
+local function applyVisionDelta(data)
+	refreshFolders()
+
+	-- Erst erkundet, dann sichtbar - damit ein Feld, das beides neu ist,
+	-- korrekt auf "visible" endet.
+	for _, key in ipairs(data.newlyExplored or {}) do
+		exploredSet[key] = true
+		setHexState(key, FogOfWarConfig.STATE.EXPLORED)
+	end
+	for _, key in ipairs(data.newlyVisible or {}) do
+		visibleSet[key] = true
+		exploredSet[key] = true
+		setHexState(key, FogOfWarConfig.STATE.VISIBLE)
+	end
+	for _, key in ipairs(data.newlyHidden or {}) do
+		visibleSet[key] = nil
+		setHexState(key, FogOfWarConfig.STATE.EXPLORED)
+	end
+
+	updateArmyVisibility()
+	refreshBuildings()
+
+	print(("[Fog] Update: %d neu sichtbar, %d versteckt")
+		:format(#(data.newlyVisible or {}), #(data.newlyHidden or {})))
+end
+
+--------------------------------------------------------------------------------
+-- WATCHER (neu auftauchende Modelle sofort behandeln)
+--------------------------------------------------------------------------------
+local function connectBuildingsWatcher(folder)
+	if not folder then return end
+	buildingsFolder = folder
+	folder.ChildAdded:Connect(function(child)
 		if not child then return end
 		local key = buildingKeyFromName(child.Name)
-		if key then
-			applyHexByKey(key)
-		end
+		if key then setHexState(key, getState(key)) end
 	end)
-	-- Bestehende Gebaeude (inkl. Ghost_) sofort nachziehen.
 	pcall(refreshBuildings)
 end
 
-local function connectArmyWatcher(armyFolder)
-	if not armyFolder then return end
-	armyModelsFolder = armyFolder
-	armyFolder.ChildAdded:Connect(function(child)
-		if child then pcall(refreshArmies) end
+local function connectArmyWatcher(folder)
+	if not folder then return end
+	armyModelsFolder = folder
+	folder.ChildAdded:Connect(function(child)
+		if child then pcall(updateArmyVisibility) end
 	end)
-	-- Bestehende Armee-Modelle sofort nachziehen.
-	pcall(refreshArmies)
+	pcall(updateArmyVisibility)
 end
 
 local function setupHexMapWatchers()
 	refreshFolders()
 	if not hexMapFolder then return end
 
-	-- Bestehende Folder (falls schon vorhanden) direkt verbinden.
 	connectBuildingsWatcher(hexMapFolder:FindFirstChild("Buildings"))
 	connectArmyWatcher(hexMapFolder:FindFirstChild("ArmyModels"))
 
@@ -378,161 +353,73 @@ local function setupHexMapWatchers()
 end
 
 --------------------------------------------------------------------------------
--- PUBLIC NAME / READY (vorab deklariert, damit applyFullVision darauf zugreifen kann)
+-- INITIALISIERUNG + RACE-HANDLING
 --------------------------------------------------------------------------------
-local FogOfWarController = { Ready = false }
-function FogOfWarController.MarkReady()
-	FogOfWarController.Ready = true
-	print("[FogOfWarController] Bereit.")
+-- Rojo/Replikation sind asynchron: Das erste FogOfWarInit kann VOR oder NACH
+-- der HexMap-Erstellung eintreffen. Deshalb merken wir das Init, falls die Map
+-- noch nicht da ist, und wenden es an, sobald sie bereitsteht. hideEverything()
+-- laeuft nur EINMAL bei Map-Bereitschaft - nie nach einem Init (sonst wuerde
+-- es die aufgedeckten Felder erneut verstecken).
+local mapReady = false
+local pendingInit = nil
+
+local function finishInitIfReady()
+	if mapReady and pendingInit then
+		local data = pendingInit
+		pendingInit = nil
+		applyFullVision(data)
+	end
 end
 
---------------------------------------------------------------------------------
--- DIAGNOSE HILFE (per Hand aufrufen, NICHT im Normalbetrieb)
---------------------------------------------------------------------------------
--- Wenn die Pipeline NICHT das Problem ist, kann man mit diesem Aufruf ALLE
--- Hex-Modelle sichtbar machen, um die Workspace-Struktur zu pruefen.
--- Aufruf im Command-Bar beim Testen:  FogOfWarDebugReveal()
-_G.FogOfWarDebugReveal = function()
-	local hexMap = workspace:FindFirstChild("HexMap")
-	if not hexMap then
-		warn("[FogOfWar TEST] HexMap nicht gefunden")
-		return
-	end
-	for _, folder in ipairs(hexMap:GetDescendants()) do
-		if folder:IsA("BasePart") then
-			folder.Transparency = 0
-		end
-	end
-	print("[FogOfWar TEST] Alle Hexes sichtbar gemacht!")
-end
-
---------------------------------------------------------------------------------
--- HIDE ALLES (Initialzustand beim Start - "nichts generiert")
---------------------------------------------------------------------------------
-local function hideEverything()
-	refreshFolders()
-	if not hexMapFolder then return end
-	-- Jedes direkte Kind (Terrain-Folder, Soils, Buildings, ProvinceVisuals,
-	-- ArmyModels) komplett unsichtbar machen.
-	for _, child in ipairs(hexMapFolder:GetChildren()) do
-		setModelVisibility(child, false, 1)
-	end
-
-	-- Expliziter Soil-Pass: schaltet auch alle Soil-Modelle auf Transparency = 1.
-	-- (Robust - falls der generische Kinder-Loop das Soils-Folder nicht erfasst
-	-- hat oder Soils spaeter/spawnweise hinzukommen.)
-	local soilCount = 0
-	if soilsFolder then
-		for _, soilTypeFolder in ipairs(soilsFolder:GetChildren()) do
-			for _, soil in ipairs(soilTypeFolder:GetChildren()) do
-				setModelVisibility(soil, false, 1)
-				soilCount = soilCount + 1
-			end
-		end
-	end
-	print("[FogOfWar] hideEverything | Soils versteckt: " .. soilCount)
-end
-
---------------------------------------------------------------------------------
--- DELTA ANWENDEN
---------------------------------------------------------------------------------
-local function applyVisionDelta(data)
-	if not data then return end
-	refreshFolders()
-
-	-- Erst explored (halbtransparent, keine Units), dann visible (voll) -
-	-- damit ein Feld, das beides neu ist, korrekt auf "visible" endet.
-	for _, key in ipairs(data.newlyExplored or {}) do
-		setHexState(key, FogOfWarConfig.STATE.EXPLORED)
-	end
-	for _, key in ipairs(data.newlyVisible or {}) do
-		setHexState(key, FogOfWarConfig.STATE.VISIBLE)
-	end
-	for _, key in ipairs(data.newlyHidden or {}) do
-		setHexState(key, FogOfWarConfig.STATE.EXPLORED)
-	end
-
-	-- Armee-Modelle nach dem Delta neu bewerten (nie naeher als noetig).
-	refreshArmies()
-	refreshBuildings()
-end
-
---------------------------------------------------------------------------------
--- VOL LEN STATE ANWENDEN (beim Join)
---------------------------------------------------------------------------------
-local function applyFullVision(data)
-	if not data then return end
-	refreshFolders()
-
-	-- Basis: erstmal alles erkundet (auf 50% transparent), dann sichtbar.
-	for _, key in ipairs(data.explored or {}) do
-		setHexState(key, FogOfWarConfig.STATE.EXPLORED)
-	end
-	for _, key in ipairs(data.visible or {}) do
-		setHexState(key, FogOfWarConfig.STATE.VISIBLE)
-	end
-
-	FogOfWarController.MarkReady()
-	refreshArmies()
-	refreshBuildings()
-end
-
---------------------------------------------------------------------------------
--- INITIALISIERUNG
---------------------------------------------------------------------------------
--- Warten, bis die HexMap existiert (der Server spawnt sie). Dann verstecken.
 task.spawn(function()
-	-- Kurz warten, damit die Map bzw. das Spiel starten kann.
 	while not workspace:FindFirstChild("HexMap") do
 		task.wait(0.5)
 	end
 	hideEverything()
 	setupHexMapWatchers()
-	print("[FogOfWarController] Alle Hexes initial versteckt, Watcher verbunden.")
+	mapReady = true
+	finishInitIfReady()
+	print("[Fog] Initialisierung: Alles unsichtbar, HexMap bereit.")
 end)
 
 --------------------------------------------------------------------------------
--- LISTENERS
+-- REMOTE-HANDLER
 --------------------------------------------------------------------------------
 Net.On("FogOfWarInit", function(data)
 	if not data then return end
-	print(("[FogOfWar Client] INIT empfangen | visible=%d explored=%d")
-		:format(#(data.visible or {}), #(data.explored or {})))
-	task.spawn(function() applyFullVision(data) end)
+	if not mapReady then
+		pendingInit = data
+		return
+	end
+	applyFullVision(data)
 end)
 
 Net.On("FogOfWarUpdate", function(data)
 	if not data then return end
-	print(("[FogOfWar Client] UPDATE empfangen | neu=%d hidden=%d erkundet=%d")
-		:format(#(data.newlyVisible or {}), #(data.newlyHidden or {}), #(data.newlyExplored or {})))
+	if not mapReady then return end
 	task.spawn(function() applyVisionDelta(data) end)
 end)
 
--- Wenn ein Spieler neu spawnt (Charakter respawn), sollte die Map nicht wieder
--- auftauchen - das Fog-of-War gilt persistent pro Sitzung. Wir refreshen nur,
--- falls die HexMap neu aufgebaut wurde (z.B. /regen).
+-- HexMap neu aufgebaut (z.B. /regen): Zustand zuruecksetzen und neu verstecken.
 workspace.ChildAdded:Connect(function(child)
 	if child.Name == "HexMap" then
 		task.wait(1)
+		visibleSet = {}
+		exploredSet = {}
 		hideEverything()
-		stateByKey = {}
 		setupHexMapWatchers()
-		print("[FogOfWarController] HexMap neu erstellt - alles wieder versteckt.")
+		print("[Fog] HexMap neu erstellt - alles wieder versteckt.")
 	end
 end)
 
 --------------------------------------------------------------------------------
--- PERIODISCHER ARMY-REFRESH
+-- PERIODISCHER CHECK (Fallback fuer Bewegung/neue Modelle)
 --------------------------------------------------------------------------------
--- Fängt Armee-Bewegungen, die keinen Hex-Zustandswechsel auslösen (z.B. ein
--- gegnerisches Heer, das innerhalb des Sichtfelds zieht oder es verlässt).
 task.spawn(function()
 	while true do
-		task.wait(0.4)
-		-- Armee- und Gebaeude-Modelle nachziehen, damit neue/veraenderte Modelle
-		-- (auch gegnerische) im unerforschten Gebiet sofort unsichtbar werden.
-		if armyModelsFolder or buildingsFolder then
-			pcall(refreshArmies)
+		task.wait(0.5)
+		if mapReady and (armyModelsFolder or buildingsFolder) then
+			pcall(updateArmyVisibility)
 			pcall(refreshBuildings)
 		end
 	end
