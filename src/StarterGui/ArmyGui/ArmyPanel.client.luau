@@ -102,6 +102,7 @@ local MAX_SLOTS = SLOT_CONFIG.MAX_UNITS
 local slotGrid = {}          -- index -> { frame, icon, name, unitId }
 local cachedMaxUnits = 0     -- letzter bekannter Wert, um Grid neu zu bauen
 local shownUnitId = nil      -- aktuell ausgewaehlte Unit
+local hoveredUnitId = nil    -- Slot, ueber dem die Maus gerade steht (transient)
 
 --------------------------------------------------------------------------------
 -- Aufraeumen: alte statische Slots (UnitImage1-8 / UnitName1-8) entfernen.
@@ -150,15 +151,36 @@ local showUnitDetail
 local clearUnitDetail
 local clearAll
 
--- Hover-Vorschau: Zeigt beim Ueberfahren eines Slots das Unit-Icon.
-local function setHoverImage(unit)
+-- HoverUnitImage-Update (Bug-2-Fix):
+-- Die AUSWAHL hat PRIORITAET ueber den HOVER.
+--   1) Wenn eine Unit ausgewaehlt ist (shownUnitId) -> immer diese anzeigen.
+--   2) Sonst, wenn die Maus ueber einem belegten Slot steht -> gehoverte anzeigen.
+--   3) Sonst -> ausblenden.
+-- MouseLeave loescht das Bild NUR, wenn keine Unit ausgewaehlt ist.
+local function refreshHoverImage()
 	if not hoverImage then return end
-	if unit and unit.icon and unit.icon ~= "" then
-		hoverImage.Image = unit.icon
-		hoverImage.Visible = true
-	else
-		hoverImage.Visible = false
+
+	-- Prio 1: ausgewaehlte Unit (bleibt permanent sichtbar).
+	if shownUnitId then
+		local unit = ArmyDataCache.GetUnit(shownUnitId)
+		if unit and unit.icon and unit.icon ~= "" then
+			hoverImage.Image = unit.icon
+			hoverImage.Visible = true
+			return
+		end
 	end
+
+	-- Prio 2: gehoverte Unit (transient), nur wenn nichts ausgewaehlt ist.
+	if hoveredUnitId then
+		local unit = ArmyDataCache.GetUnit(hoveredUnitId)
+		if unit and unit.icon and unit.icon ~= "" then
+			hoverImage.Image = unit.icon
+			hoverImage.Visible = true
+			return
+		end
+	end
+
+	hoverImage.Visible = false
 end
 
 --------------------------------------------------------------------------------
@@ -220,13 +242,12 @@ end
 --------------------------------------------------------------------------------
 local function attachHover(slotFrame, getUnitId)
 	slotFrame.MouseEnter:Connect(function()
-		local unitId = getUnitId()
-		if not unitId then return end
-		local unit = ArmyDataCache.GetUnit(unitId)
-		if unit then setHoverImage(unit) end
+		hoveredUnitId = getUnitId()
+		refreshHoverImage()
 	end)
 	slotFrame.MouseLeave:Connect(function()
-		setHoverImage(nil)
+		hoveredUnitId = nil
+		refreshHoverImage()
 	end)
 end
 
@@ -352,7 +373,7 @@ showUnitDetail = function(unitId, slotIndex)
 	shownUnitId = unitId
 
 	if unitFrame then unitFrame.Visible = true end
-	if hoverImage then hoverImage.Image = unit.icon or "" hoverImage.Visible = true end
+	refreshHoverImage()
 	if uName then uName.Text = unit.name or unit.unitType end
 	if uHealth then uHealth.Text = unit.currentLP .. "/" .. unit.maxLP end
 	if uAttack then uAttack.Text = unit.attack .. " Attack" end
@@ -371,8 +392,9 @@ end
 
 clearUnitDetail = function()
 	shownUnitId = nil
+	hoveredUnitId = nil
 	if unitFrame then unitFrame.Visible = false end
-	if hoverImage then hoverImage.Visible = false end
+	refreshHoverImage()
 end
 
 clearAll = function()
@@ -446,13 +468,21 @@ end
 local function show()
 	gui.Enabled = true
 	cleanupLegacySlots()
+	-- BuildCampButton IMMER sichtbar/klickbar machen - unabhaengig von
+	-- Auswahl oder dynamischem Slot-System (Bug-1-Fix).
+	if buildBtn then
+		buildBtn.Visible = true
+		buildBtn.Active = true
+		buildBtn.AutoButtonColor = true
+	end
 	applyCombatLock()
 	ArmyDataCache.Refresh()
 end
 
 local function hide()
 	gui.Enabled = false
-	if buildBtn then buildBtn.Visible = false end
+	-- BuildCampButton NICHT verstecken: er soll dauerhaft sichtbar bleiben.
+	-- Das Panel wird ueber gui.Enabled ein-/ausgeblendet, nicht ueber den Button.
 	clearAll()
 end
 
