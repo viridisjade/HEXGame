@@ -275,7 +275,7 @@ function CitySystem.FoundCity(player, campId)
 	pcall(PointSystem.AwardPoints, player, "CityFounded", VictoryConfig.ACTIVE_POINTS.CityFounded)
 	if not PlayerData.GetCapitalCityId(player) then
 		PlayerData.SetCapitalCityId(player, cityId)
-		CitySystem.addCapitalMarker(model, q, r)
+		CitySystem.addCapitalMarker(model, q, r, player.Name)
 		pcall(CitySystem.broadcastCapitalMarked, player, cityId, q, r)
 		print("[CitySystem] Dies ist die HAUPTSTADT von " .. player.Name)
 	end
@@ -285,15 +285,15 @@ function CitySystem.FoundCity(player, campId)
 end
 
 --------------------------------------------------------------------------------
--- addCapitalMarker(model, q, r) - goldener Stern + "Hauptstadt"-Label
+-- addCapitalMarker(model, q, r, playerName) - goldener Stern + "Hauptstadt von X"
 --------------------------------------------------------------------------------
-function CitySystem.addCapitalMarker(model, q, r)
+function CitySystem.addCapitalMarker(model, q, r, playerName)
 	if not model then return end
 	if model:FindFirstChild("CapitalMarker") then return end
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "CapitalMarker"
-	billboard.Size = UDim2.fromOffset(160, 80)
+	billboard.Size = UDim2.fromOffset(260, 80)
 	billboard.StudsOffset = Vector3.new(0, 6, 0)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 500
@@ -316,8 +316,10 @@ function CitySystem.addCapitalMarker(model, q, r)
 	label.Size = UDim2.fromScale(1, 0.45)
 	label.Position = UDim2.fromScale(0, 0.55)
 	label.BackgroundTransparency = 1
-	label.Text = "Hauptstadt"
-	label.TextSize = 18
+	label.Text = "Hauptstadt von " .. tostring(playerName or "?")
+	label.TextSize = 15
+	label.TextScaled = false
+	label.TextWrapped = false
 	label.TextColor3 = Color3.fromRGB(255, 215, 0)
 	label.Font = Enum.Font.GothamBold
 	label.Parent = billboard
@@ -335,6 +337,7 @@ function CitySystem.broadcastCapitalMarked(player, cityId, q, r)
 	pcall(function()
 		rem:FireAllClients({
 			playerId = player.UserId,
+			playerName = player.Name,
 			cityId = cityId,
 			q = q,
 			r = r,
