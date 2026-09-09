@@ -82,23 +82,12 @@ barInner.BorderSizePixel = 0
 local diplomacyButton = empireFrame:FindFirstChild("DiplomacyOverlayButton")
 
 if not diplomacyButton then
-	local researchBtn = empireFrame:FindFirstChild("ResearchOverlayButton")
 	local newBtn = Instance.new("TextButton")
 	newBtn.Name = "DiplomacyOverlayButton"
 
-	if researchBtn then
-		-- Neben dem Research-Button: rechte Kante + Abstand.
-		newBtn.Size = researchBtn.Size
-		newBtn.Position = UDim2.new(
-			researchBtn.Position.X.Scale,
-			researchBtn.Position.X.Offset + researchBtn.Size.X.Offset + 8,
-			researchBtn.Position.Y.Scale,
-			researchBtn.Position.Y.Offset
-		)
-	else
-		newBtn.Size = UDim2.fromOffset(140, 36)
-		newBtn.Position = UDim2.new(1, -150, 0, 14)
-	end
+	-- Eigene Position, unabhaengig vom Research-Button.
+	newBtn.Size = UDim2.fromOffset(140, 36)
+	newBtn.Position = UDim2.new(-0.073, 0, -0.072, 0)
 
 	newBtn.BackgroundColor3 = Color3.fromRGB(45, 90, 160)
 	newBtn.BorderSizePixel = 0
