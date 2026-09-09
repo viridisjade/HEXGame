@@ -8,7 +8,7 @@
         - Laufende (unbeantwortete) Angebote mit Timeout-Zaehler
 
     Beziehungs-Modell (3 Stufen):
-        "Allied" | "Neutral" | "War"
+        "Alliance" | "Neutral" | "War"
     Start-Zustand jedes Paares ist "Neutral".
 
     Angebot-Struktur:
@@ -21,7 +21,7 @@
         }
 
     Kompatibilitaet: das alte DiplomacySystem nutzte "peace"/"war". Wir mappen
-    altes "peace" -> "Allied", "war" -> "War". Aufrufer wie CombatSystem
+    altes "peace" -> "Alliance", "war" -> "War". Aufrufer wie CombatSystem
     (AreAllied) und MovementSystem (IsAtWar) bleiben unveraendert.
 --]]
 
@@ -32,7 +32,7 @@ local DiplomacyData = {}
 
 -- Zentraler State (alternativ koennte er in PlayerData liegen; hier zentral,
 -- damit beide Seiten (Beziehung + Angebote) atomar zusammen bleiben).
-local relations = {}        -- [keyA_B] = "Allied" | "Neutral" | "War"
+local relations = {}        -- [keyA_B] = "Alliance" | "Neutral" | "War"
 local pendingOffers = {}    -- [offerId] = offer
 local nextOfferId = 1
 
@@ -211,7 +211,7 @@ end
 function DiplomacyData.AreAllied(playerA, playerB)
 	if playerA == nil or playerB == nil then return false end
 	if playerA == playerB then return true end
-	return DiplomacyData.GetRelation(playerA, playerB) == DiplomacyConfig.STATE.ALLIED
+	return DiplomacyData.GetRelation(playerA, playerB) == DiplomacyConfig.STATE.ALLIANCE
 end
 
 return DiplomacyData

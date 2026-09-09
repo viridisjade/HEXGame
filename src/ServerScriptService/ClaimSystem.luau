@@ -27,9 +27,13 @@
 
 local ClaimSystem = {}
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local ProvinceData = require(script.Parent:WaitForChild("ProvinceData"))
 local HexData = require(script.Parent:WaitForChild("HexData"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 --------------------------------------------------------------------------------
 -- KONFIGURATION
@@ -105,8 +109,12 @@ function ClaimSystem.ClaimProvince(player, provinceId)
 	end
 
 	-- Falls Province bereits einem anderen Spieler gehört: alten Owner entfernen
+	-- + Verlust-Punkte (ProvinceLost) fuer den vorherigen Besitzer.
 	if province.owner and province.owner ~= player then
+		local prevOwner = province.owner
 		ClaimSystem.UnclaimProvince(provinceId)
+		pcall(PointSystem.DeductPoints, prevOwner, "ProvinceLost",
+			VictoryConfig.LOSS_POINTS.ProvinceLost)
 	end
 
 	-- Spielerfarbe holen und aufhellen

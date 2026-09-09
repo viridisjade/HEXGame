@@ -175,7 +175,7 @@ end
 -- Der Server pusht DiplomacyUpdate/DiplomacyNotification; der Client speichert
 -- hier den letzten Stand und feuert OnDiplomacyChanged an die GUIs.
 --------------------------------------------------------------------------------
-local diplomacyRelations = {}   -- [otherUserId] = "Allied"|"Neutral"|"War"
+local diplomacyRelations = {}   -- [otherUserId] = "Alliance"|"Neutral"|"War"
 local diplomacyOffers = {}      -- [offerId] = offer
 
 local diplomacyEvent = Instance.new("BindableEvent")
@@ -206,6 +206,54 @@ diplomacyToggle.Parent = ReplicatedStorage
 ClientState.ToggleDiplomacy = diplomacyToggle.Event
 function ClientState.FireToggleDiplomacy()
 	diplomacyToggle:Fire()
+end
+
+--------------------------------------------------------------------------------
+-- VICTORY STATE (lokaler Client-Cache)
+-- Der Server pusht PointsUpdate/VictoryAchieved/PlayerEliminated/
+-- CapitalCityMarked; der Client speichert hier den letzten Stand.
+--------------------------------------------------------------------------------
+local points = 0
+local capitalCityId = nil
+local isEliminated = false
+
+local victoryEvent = Instance.new("BindableEvent")
+ClientState.OnVictoryChanged = victoryEvent.Event
+
+function ClientState.SetPoints(newPoints, reason, delta)
+	points = tonumber(newPoints) or 0
+	victoryEvent:Fire({ kind = "points", points = points, reason = reason, delta = delta })
+end
+
+function ClientState.GetPoints()
+	return points
+end
+
+function ClientState.SetCapitalCityId(cityId)
+	capitalCityId = cityId
+	victoryEvent:Fire({ kind = "capital", capitalCityId = cityId })
+end
+
+function ClientState.GetCapitalCityId()
+	return capitalCityId
+end
+
+function ClientState.SetEliminated(value)
+	isEliminated = value == true
+	victoryEvent:Fire({ kind = "eliminated", isEliminated = isEliminated })
+end
+
+function ClientState.IsEliminated()
+	return isEliminated
+end
+
+-- BindableEvent zum Oeffnen/Schliessen des Victory-Fensters.
+local victoryToggle = Instance.new("BindableEvent")
+victoryToggle.Name = "ToggleVictory"
+victoryToggle.Parent = ReplicatedStorage
+ClientState.ToggleVictory = victoryToggle.Event
+function ClientState.FireToggleVictory()
+	victoryToggle:Fire()
 end
 
 return ClientState

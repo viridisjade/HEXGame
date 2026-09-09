@@ -5,8 +5,8 @@
     Diplomatie-Fenster. Baut die UI zur Laufzeit (ensure-Muster) und zeigt:
       - PlayerList (links): alle anderen Spieler mit Farbe + Beziehungsstatus.
       - ActionPanel (rechts): Aktionen je nach Beziehung.
-        Neutral   -> Bündnis anbieten + Krieg erklären
-        Verbündet -> Krieg erklären (Bündnis brechen)
+        Neutral   -> Allianz anbieten + Krieg erklären
+        Allianz   -> Krieg erklären (Allianz brechen)
         Krieg     -> Frieden anbieten
 
     Oeffnen/Schliessen ueber ClientState.ToggleDiplomacy (empire-Button).
@@ -136,10 +136,10 @@ local function makeActionButton(name, text, y, color)
 	return btn
 end
 
-local allianceBtn = makeActionButton("AllianceButton", "🤝 Bündnis anbieten", 90, Color3.fromRGB(40, 110, 70))
+local allianceBtn = makeActionButton("AllianceButton", "🤝 Allianz anbieten", 90, Color3.fromRGB(40, 110, 70))
 local warBtn = makeActionButton("WarButton", "⚔️ Krieg erklären", 140, Color3.fromRGB(150, 60, 60))
 local peaceBtn = makeActionButton("PeaceButton", "🕊️ Frieden anbieten", 90, Color3.fromRGB(60, 90, 150))
-local breakBtn = makeActionButton("BreakButton", "💔 Bündnis auflösen", 140, Color3.fromRGB(120, 50, 50))
+local breakBtn = makeActionButton("BreakButton", "💔 Allianz auflösen", 140, Color3.fromRGB(120, 50, 50))
 
 --------------------------------------------------------------------------------
 -- STATE
@@ -151,13 +151,13 @@ local selectedUserId = nil
 local renderActionPanel
 
 local function StateName(state)
-	if state == DiplomacyConfig.STATE.ALLIED then return "Verbündet" end
+	if state == DiplomacyConfig.STATE.ALLIANCE then return "Allianz" end
 	if state == DiplomacyConfig.STATE.WAR then return "Krieg" end
 	return "Neutral"
 end
 
 local function relationColor(state)
-	if state == DiplomacyConfig.STATE.ALLIED then return Color3.fromRGB(60, 170, 90) end
+	if state == DiplomacyConfig.STATE.ALLIANCE then return Color3.fromRGB(60, 170, 90) end
 	if state == DiplomacyConfig.STATE.WAR then return Color3.fromRGB(200, 70, 70) end
 	return Color3.fromRGB(170, 170, 180)
 end
@@ -265,9 +265,9 @@ renderActionPanel = function(userId)
 
 	local state = entry.relation
 	allianceBtn.Visible = (state == DiplomacyConfig.STATE.NEUTRAL)
-	warBtn.Visible = (state ~= DiplomacyConfig.STATE.WAR)  -- Krieg erklären aus Neutral oder Verbündet
+	warBtn.Visible = (state ~= DiplomacyConfig.STATE.WAR)  -- Krieg erklären aus Neutral oder Allianz
 	peaceBtn.Visible = (state == DiplomacyConfig.STATE.WAR)
-	breakBtn.Visible = (state == DiplomacyConfig.STATE.ALLIED)
+	breakBtn.Visible = (state == DiplomacyConfig.STATE.ALLIANCE)
 end
 
 --------------------------------------------------------------------------------

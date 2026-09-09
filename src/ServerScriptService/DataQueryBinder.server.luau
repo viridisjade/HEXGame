@@ -138,6 +138,9 @@ local function getEmpireData(player)
 		armyCount = #ArmyData.GetArmiesByOwner(player),
 		campCount = #CampData.GetCampsByOwner(player),
 		cityCount = #CityData.GetCitiesByOwner(player),
+		points = PlayerData.GetPoints(player) or 0,
+		capitalCityId = PlayerData.GetCapitalCityId(player),
+		isEliminated = PlayerData.IsEliminated(player),
 	}
 end
 

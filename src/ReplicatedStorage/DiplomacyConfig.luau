@@ -7,12 +7,12 @@
     (DiplomacyGuiController, NotificationGuiController) und Empire-Overlay.
 
     BEZIEHUNGSSTUFEN
-        Allied   -> Verbündet: keine Kämpfe, Armeen koexistieren
+        Allied   -> Allianz: keine Kämpfe, Armeen koexistieren
         Neutral  -> Standard: alles möglich
         War      -> Krieg: aktive Kämpfe erlaubt
 
     ANGEBOTS-TYPEN
-        Alliance -> Bündnis (Neutral -> Verbündet, Zustimmung beider)
+        Alliance -> Allianz (Neutral -> Allianz, Zustimmung beider)
         Peace    -> Frieden (Krieg -> Neutral, Zustimmung beider)
 
     BENACHRICHTIGUNGSTYPEN
@@ -21,7 +21,7 @@
         Accepted  (Typ 3, positiv, gruen)     Angebot angenommen
         Declined  (Typ 4, negativ, orange)    Angebot abgelehnt
         Expired   (Typ 5, info, grau)         Angebot abgelaufen
-        Broken    (Typ 6, warnung, dunkelrot) Buendnis gebrochen
+        Broken    (Typ 6, warnung, dunkelrot) Allianz gebrochen
 --]]
 
 local DiplomacyConfig = {}
@@ -29,18 +29,20 @@ local DiplomacyConfig = {}
 --------------------------------------------------------------------------------
 -- BEZIEHUNGSSTUFEN
 --------------------------------------------------------------------------------
-DiplomacyConfig.RELATION_STATES = { "Allied", "Neutral", "War" }
+DiplomacyConfig.RELATION_STATES = { "Alliance", "Neutral", "War" }
 
 DiplomacyConfig.STATE = {
-	ALLIED  = "Allied",
-	NEUTRAL = "Neutral",
-	WAR     = "War",
+	ALLIANCE = "Alliance",
+	NEUTRAL  = "Neutral",
+	WAR      = "War",
 }
 
 -- Alte Keys (fuer Kompatibilitaet mit bestehendem Code). Mapping zu neuem Modell.
 DiplomacyConfig.LEGACY_MAP = {
-	peace = "Allied",
+	peace = "Alliance",
+	Allied = "Alliance",
 	war   = "War",
+	alliance = "Alliance",
 }
 
 --------------------------------------------------------------------------------
@@ -56,7 +58,7 @@ DiplomacyConfig.OFFER = {
 
 -- Ein Angebot gilt nur aus bestimmter Ausgangslage.
 DiplomacyConfig.OFFER_ALLOWED_FROM = {
-	Alliance = "Neutral",  -- Buendnis nur aus Neutral
+	Alliance = "Neutral",  -- Allianz nur aus Neutral
 	Peace    = "War",      -- Frieden nur aus Krieg
 }
 

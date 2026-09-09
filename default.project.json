@@ -101,6 +101,16 @@
         },
         "$path": "src/StarterGui/TechTreeGui"
       },
+      "VictoryGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ResetOnSpawn": false,
+          "IgnoreGuiInset": true,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/VictoryGui"
+      },
       "TestGui": {
         "$className": "ScreenGui",
         "$properties": {

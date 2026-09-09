@@ -53,6 +53,9 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
 local CityData = require(script.Parent:WaitForChild("CityData"))
 local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictorySystem = require(script.Parent:WaitForChild("VictorySystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 -- Combat rule (was UnitConfig.MAX_DEFENSE_PERCENT): absorption is capped at 70%.
 local MAX_DEFENSE_PERCENT = 70
@@ -459,13 +462,13 @@ function CombatSystem.StartCombat(attackerArmyId, defenderArmyId, q, r)
 
 	local isWildlife = (defenderArmy.owner == nil)
 
-	-- Allies never fight each other. (Diplomacy: AreAllied gilt nur fuer
-	-- "Allied"; "Neutral"/"War" duerfen kaempfen. Wildlife (owner == nil)
-	-- ist nie Verbündeter.)
-	if not isWildlife and type(DiplomacySystem.AreAllied) == "function"
+	-- Allianz-Mitglieder kaempfen nie gegeneinander. (Diplomacy: AreInAlliance
+	-- gilt nur fuer "Alliance"; "Neutral"/"War" duerfen kaempfen. Wildlife
+	-- (owner == nil) ist nie Allianz-Mitglied.)
+	if not isWildlife and type(DiplomacySystem.AreInAlliance) == "function"
 		and attackerArmy.owner and defenderArmy.owner
-		and DiplomacySystem.AreAllied(attackerArmy.owner, defenderArmy.owner) then
-		return nil, "Verbuendete - kein Angriff"
+		and DiplomacySystem.AreInAlliance(attackerArmy.owner, defenderArmy.owner) then
+		return nil, "Allianz - kein Angriff"
 	end
 
 	-- Guard: never stack two combats on the same hex or army.
@@ -1203,6 +1206,44 @@ function CombatSystem.EndCombat(combat, winnerSide, byFlight)
 	-- Beteiligten neu berechnen (weniger Sicht, Gebaeude bleiben als Quelle).
 	if combat.attackerOwner then pcall(FogOfWarSystem.UpdateVision, combat.attackerOwner) end
 	if combat.defenderOwner then pcall(FogOfWarSystem.UpdateVision, combat.defenderOwner) end
+
+	-- VICTORY: Punkte + City-Eroberung + Hauptstadt-Eliminierung.
+	pcall(function()
+		if not byFlight then
+			local winnerOwner = ownerOf(combat, winnerSide)
+			local loserOwner = ownerOf(combat, loserSide)
+
+			if winnerOwner then
+				-- Besiegte feindliche Armee (+25), nur wenn der Verlierer ein
+				-- Spieler ist (kein Wildtier).
+				if loserOwner and loserOwner ~= winnerOwner then
+					pcall(PointSystem.AwardPoints, winnerOwner, "ArmyDefeated",
+						VictoryConfig.ACTIVE_POINTS.ArmyDefeated)
+				end
+
+				-- City-Eroberung: nur wenn der Angreifer das Hex einnimmt.
+				if winnerSide == "attacker" and loserOwner then
+					local city = CityData.GetCityOnHex(hexQ, hexR)
+					if city and city.owner == loserOwner then
+						if PlayerData.GetCapitalCityId(loserOwner) == city.id then
+							-- HAUPTSTADT erobert -> Eliminierung des Besitzers.
+							pcall(VictorySystem.EliminatePlayer, loserOwner, winnerOwner,
+								"Hauptstadt erobert")
+						else
+							pcall(PointSystem.AwardPoints, winnerOwner, "CityConquered",
+								VictoryConfig.ACTIVE_POINTS.CityConquered)
+							pcall(PointSystem.DeductPoints, loserOwner, "CityLost",
+								VictoryConfig.LOSS_POINTS.CityLost)
+							-- Stadt an den Eroberer uebertragen.
+							city.owner = winnerOwner
+						end
+					end
+				end
+			end
+
+			pcall(VictorySystem.CheckVictory)
+		end
+	end)
 
 	print(("[CombatSystem] Kampf %d beendet - Sieger: %s%s")
 		:format(combat.id, tostring(winnerSide), byFlight and " (Flucht)" or ""))

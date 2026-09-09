@@ -12,6 +12,9 @@ local ArmyStats = require(script.Parent:WaitForChild("ArmyStats"))
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
 local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictorySystem = require(script.Parent:WaitForChild("VictorySystem"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 -- NOTE: combats no longer tick with the game round. They run asynchronously
 -- and are driven by CombatSystem's own turn timers (see CombatSystem.StartTurn).
 
@@ -198,13 +201,21 @@ local function endRound()
 	print("[RoundSystem] === Runde " .. currentRound .. " beendet ===")
 	broadcastRoundEnd()
 
-	-- Diplomatie: abgelaufene Angebote (Bündnis-/Friedensantraege) verarbeiten.
+	-- Diplomatie: abgelaufene Angebote (Allianz-/Friedensantraege) verarbeiten.
 	local okDipl, DiplomacySystem = pcall(function()
 		return require(script.Parent:WaitForChild("DiplomacySystem"))
 	end)
 	if okDipl and DiplomacySystem then
 		pcall(DiplomacySystem.ProcessExpiredOffers)
 	end
+
+	-- VICTORY: Passive Punkte am Rundenende (City/Camp/Provinz) + Sieg-Check.
+	for _, player in ipairs(Players:GetPlayers()) do
+		if not PlayerData.IsEliminated(player) then
+			pcall(PointSystem.CalculateRoundPoints, player)
+		end
+	end
+	pcall(VictorySystem.CheckVictory)
 
 	task.wait(2)
 end

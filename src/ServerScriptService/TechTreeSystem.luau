@@ -38,6 +38,8 @@ local Players = game:GetService("Players")
 
 local TechConfig = require(ReplicatedStorage:WaitForChild("TechConfig"))
 local TechData = require(script.Parent:WaitForChild("TechData"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 local TechTreeSystem = {}
 
@@ -346,6 +348,11 @@ function TechTreeSystem.ProcessResearch(player)
 						TechData.MarkResearched(player, techId)
 						TechTreeSystem.ApplyEffect(player, techId)
 						table.insert(finished, techId)
+						-- VICTORY: GoldTech +40 Punkte, wenn ein Tech die Gold-Stufe (max) erreicht.
+						if targetLevel == TechConfig.MAX_LEVEL then
+							pcall(PointSystem.AwardPoints, player, "GoldTech",
+								VictoryConfig.ACTIVE_POINTS.GoldTech)
+						end
 					else
 						rec.currentProgress[techId] = current + remaining
 						remaining = 0

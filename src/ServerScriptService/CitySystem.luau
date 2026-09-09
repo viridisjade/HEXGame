@@ -19,6 +19,8 @@ local BuildingConfig = require(script.Parent:WaitForChild("BuildingConfig"))
 local ProvinceData = require(script.Parent:WaitForChild("ProvinceData"))
 local SoilGenerator = require(script.Parent:WaitForChild("SoilGenerator"))
 local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 --------------------------------------------------------------------------------
 -- KONFIGURATION
@@ -268,8 +270,76 @@ function CitySystem.FoundCity(player, campId)
 
 	CitySystem.recolorProvinceToCityColor(provinceId, player)
 
+	-- VICTORY: Erste City eines Spielers wird automatisch zur HAUPTSTADT.
+	-- Jede City-Gründung bringt +75 Punkte.
+	pcall(PointSystem.AwardPoints, player, "CityFounded", VictoryConfig.ACTIVE_POINTS.CityFounded)
+	if not PlayerData.GetCapitalCityId(player) then
+		PlayerData.SetCapitalCityId(player, cityId)
+		CitySystem.addCapitalMarker(model, q, r)
+		pcall(CitySystem.broadcastCapitalMarked, player, cityId, q, r)
+		print("[CitySystem] Dies ist die HAUPTSTADT von " .. player.Name)
+	end
+
 	print("[CitySystem] City gegründet: " .. CityData.GetName(cityId) .. " (ID: " .. cityId .. ") von " .. player.Name)
 	return cityId, nil
+end
+
+--------------------------------------------------------------------------------
+-- addCapitalMarker(model, q, r) - goldener Stern + "Hauptstadt"-Label
+--------------------------------------------------------------------------------
+function CitySystem.addCapitalMarker(model, q, r)
+	if not model then return end
+	if model:FindFirstChild("CapitalMarker") then return end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "CapitalMarker"
+	billboard.Size = UDim2.fromOffset(160, 80)
+	billboard.StudsOffset = Vector3.new(0, 6, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 500
+	billboard.SizeOffset = Vector2.new(0, 0)
+	billboard.ResetOnSpawn = false
+	billboard.Parent = model
+
+	local star = Instance.new("TextLabel")
+	star.Name = "Star"
+	star.Size = UDim2.fromScale(1, 0.55)
+	star.Position = UDim2.fromScale(0, 0)
+	star.BackgroundTransparency = 1
+	star.Text = "⭐"
+	star.TextSize = 40
+	star.TextColor3 = Color3.fromRGB(255, 215, 0)
+	star.Parent = billboard
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.fromScale(1, 0.45)
+	label.Position = UDim2.fromScale(0, 0.55)
+	label.BackgroundTransparency = 1
+	label.Text = "Hauptstadt"
+	label.TextSize = 18
+	label.TextColor3 = Color3.fromRGB(255, 215, 0)
+	label.Font = Enum.Font.GothamBold
+	label.Parent = billboard
+
+	return billboard
+end
+
+--------------------------------------------------------------------------------
+-- broadcastCapitalMarked(player, cityId, q, r)
+--------------------------------------------------------------------------------
+function CitySystem.broadcastCapitalMarked(player, cityId, q, r)
+	local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
+	local rem = dataRemotes and dataRemotes:FindFirstChild("CapitalCityMarked")
+	if not rem then return end
+	pcall(function()
+		rem:FireAllClients({
+			playerId = player.UserId,
+			cityId = cityId,
+			q = q,
+			r = r,
+		})
+	end)
 end
 
 --------------------------------------------------------------------------------

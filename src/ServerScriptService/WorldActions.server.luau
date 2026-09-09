@@ -23,6 +23,8 @@ local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
 local ArmySpawner = require(script.Parent:WaitForChild("ArmySpawner"))
 local BuildingSystem = require(script.Parent:WaitForChild("BuildingSystem"))
 local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -83,6 +85,9 @@ onEvent("RequestClaimProvince", function(player, q, r)
 
 	if ClaimSystem.ClaimProvince(player, provinceId) then
 		print("[WorldActions] Province " .. provinceId .. " von " .. player.Name .. " geclaimt")
+		-- VICTORY: ProvinceClaimed +15 Punkte.
+		pcall(PointSystem.AwardPoints, player, "ProvinceClaimed",
+			VictoryConfig.ACTIVE_POINTS.ProvinceClaimed)
 	else
 		warn("[WorldActions] Claim fehlgeschlagen für Province " .. provinceId)
 	end
@@ -128,6 +133,9 @@ onEvent("RequestBuildCamp", function(player, armyId)
 		print("[WorldActions] Camp gebaut (ID: " .. buildingId .. ") von " .. player.Name)
 		-- Fog of War: ein Camp ist eine Sichtquelle (CAMP_SIGHT).
 		pcall(FogOfWarSystem.UpdateVision, player)
+		-- VICTORY: CampBuilt +25 Punkte.
+		pcall(PointSystem.AwardPoints, player, "CampBuilt",
+			VictoryConfig.ACTIVE_POINTS.CampBuilt)
 	else
 		warn("[WorldActions] Camp-Bau fehlgeschlagen: " .. tostring(reason))
 	end

@@ -121,6 +121,12 @@ ensure(dataRemotes, "RemoteFunction", "GetDiplomacyPlayers")
 ensure(dataRemotes, "RemoteEvent", "FogOfWarInit")
 ensure(dataRemotes, "RemoteEvent", "FogOfWarUpdate")
 
+-- Victory system: server -> client push
+ensure(dataRemotes, "RemoteEvent", "PointsUpdate")
+ensure(dataRemotes, "RemoteEvent", "VictoryAchieved")
+ensure(dataRemotes, "RemoteEvent", "PlayerEliminated")
+ensure(dataRemotes, "RemoteEvent", "CapitalCityMarked")
+
 ensure(ReplicatedStorage, "RemoteEvent", "RoundEnd")
 ensure(ReplicatedStorage, "RemoteEvent", "SkipRound")
 ensure(ReplicatedStorage, "RemoteFunction", "RequestRoute")

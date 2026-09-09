@@ -23,6 +23,57 @@ local armyLabel = empireFrame:FindFirstChild("PlayerArmyCountLable")
 local campLabel = empireFrame:FindFirstChild("PlayerCampCountLable")
 local cityLabel = empireFrame:FindFirstChild("PlayerCityCountLable")
 
+-------------------------------------------------------------------------------
+-- VICTORY: Punkte-Anzeige (Label) + Fortschrittsbalken zum Sieg-Punktestand.
+-- Wird zur Laufzeit erzeugt, falls nicht in der EmpireFrame.rbxm vorhanden.
+-------------------------------------------------------------------------------
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
+local SOLO_WIN = VictoryConfig.SOLO_WIN_POINTS or 1000
+
+local function ensureChild(container, name, className)
+	local c = container:FindFirstChild(name)
+	if c then return c end
+	local obj = Instance.new(className)
+	obj.Name = name
+	obj.Parent = container
+	return obj
+end
+
+local function makeLabel(parent, name, text, size, pos, color)
+	local lbl = ensureChild(parent, name, "TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextSize = size or 14
+	lbl.TextColor3 = color or Color3.fromRGB(238, 240, 248)
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Text = text or ""
+	if pos then
+		lbl.Position = pos
+		lbl.Size = UDim2.fromOffset(180, 20)
+	end
+	return lbl
+end
+
+local pointsLabel = ensureChild(empireFrame, "PlayerPointsLable", "TextLabel")
+pointsLabel.BackgroundTransparency = 1
+pointsLabel.Font = Enum.Font.GothamBold
+pointsLabel.TextSize = 14
+pointsLabel.TextColor3 = Color3.fromRGB(255, 205, 90)
+pointsLabel.TextXAlignment = Enum.TextXAlignment.Left
+pointsLabel.Text = "Punkte: 0"
+pointsLabel.Size = UDim2.fromOffset(180, 20)
+pointsLabel.Position = UDim2.new(0, 12, 1, -120)
+
+local pointsBar = ensureChild(empireFrame, "VictoryProgressBar", "Frame")
+pointsBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+pointsBar.BorderSizePixel = 0
+pointsBar.Size = UDim2.new(0, 180, 0, 12)
+pointsBar.Position = UDim2.new(0, 12, 1, -96)
+local barInner = ensureChild(pointsBar, "Bar", "Frame")
+barInner.Size = UDim2.fromScale(0, 1)
+barInner.BackgroundColor3 = Color3.fromRGB(255, 205, 90)
+barInner.BorderSizePixel = 0
+
 --------------------------------------------------------------------------------
 -- DIPLOMATIE: der Diplomatie-Button togglet das Diplomatie-Fenster.
 -- Der Button existiert nicht in der EmpireFrame.rbxm, daher wird er zur Laufzeit
@@ -223,6 +274,15 @@ local function updateOverlay()
 	if cityLabel then
 		cityLabel.Text = "Städte: " .. tostring(data.cityCount or 0)
 	end
+
+	-- VICTORY: Punkte + Fortschritt Richtung Solo-Sieg-Schwelle.
+	if pointsLabel then
+		pointsLabel.Text = "Punkte: " .. tostring(data.points or 0)
+	end
+	if barInner then
+		local frac = math.clamp((data.points or 0) / SOLO_WIN, 0, 1)
+		barInner.Size = UDim2.fromScale(frac, 1)
+	end
 end
 
 task.spawn(function()
@@ -233,5 +293,24 @@ task.spawn(function()
 end)
 
 updateOverlay()
+
+--------------------------------------------------------------------------------
+-- VICTORY REMOTES -> ClientState (lokal, fuer andere GUIs).
+--------------------------------------------------------------------------------
+local Net = require(ReplicatedStorage:WaitForChild("Net"))
+Net.On("PointsUpdate", function(payload)
+	if not payload then return end
+	ClientState.SetPoints(payload.points, payload.reason, payload.delta)
+end)
+Net.On("CapitalCityMarked", function(payload)
+	if not payload then return end
+	ClientState.SetCapitalCityId(payload.cityId)
+end)
+Net.On("PlayerEliminated", function(payload)
+	if not payload then return end
+	if payload.playerId == game:GetService("Players").LocalPlayer.UserId then
+		ClientState.SetEliminated(true)
+	end
+end)
 
 print("[EmpireOverlay] Bereit.")

@@ -197,7 +197,7 @@ local function pushBanner(payload)
 	-- Inhalt je Typ
 	local fromName = payload.fromPlayerName or "Ein Spieler"
 	if notifType == DiplomacyConfig.NOTIFY.OFFER then
-		local offerLabel = payload.offerType == DiplomacyConfig.OFFER.ALLIANCE and "BÜNDNIS" or "FRIEDEN"
+		local offerLabel = payload.offerType == DiplomacyConfig.OFFER.ALLIANCE and "ALLIANZ" or "FRIEDEN"
 		title.Text = "📜 " .. fromName .. " bietet dir ein " .. offerLabel .. " an!"
 		body.Text = ""
 		timer.Visible = true
@@ -212,15 +212,19 @@ local function pushBanner(payload)
 		body.Text = "Spieler '" .. fromName .. "' hat dir den Krieg erklärt!"
 		timer.Visible = false
 	elseif notifType == DiplomacyConfig.NOTIFY.BROKEN then
-		title.Text = "💔 Bündnis gebrochen!"
-		body.Text = "Spieler '" .. fromName .. "' hat das Bündnis gebrochen!"
+		title.Text = "💔 Allianz gebrochen!"
+		body.Text = "Spieler '" .. fromName .. "' hat die Allianz gebrochen!"
 	elseif notifType == DiplomacyConfig.NOTIFY.ACCEPTED then
 		title.Text = "✅ Angebot angenommen!"
 		body.Text = "Spieler '" .. fromName .. "' hat dein Angebot angenommen."
 		timer.Visible = false
 	elseif notifType == DiplomacyConfig.NOTIFY.DECLINED then
 		title.Text = "❌ Angebot abgelehnt."
-		body.Text = "Spieler '" .. fromName .. "' hat dein Angebot abgelehnt."
+		if payload.declineReason then
+			body.Text = payload.declineReason
+		else
+			body.Text = "Spieler '" .. fromName .. "' hat dein Angebot abgelehnt."
+		end
 		timer.Visible = false
 	elseif notifType == DiplomacyConfig.NOTIFY.EXPIRED then
 		title.Text = "⏳ Angebot abgelaufen."
@@ -243,6 +247,65 @@ local function pushBanner(payload)
 		if banner.Parent then banner:Destroy() end
 	end)
 
+	return banner
+end
+
+--------------------------------------------------------------------------------
+-- SIMPLE BANNER (für Victory/Elimination, ohne Diplo-Typen)
+--------------------------------------------------------------------------------
+local function pushSimpleBanner(titleText, bodyText, color, duration)
+	local banner = Instance.new("Frame")
+	banner.Name = "Banner_" .. tostring(os.clock())
+	banner.Size = UDim2.new(1, 0, 0, 0)
+	banner.AnchorPoint = Vector2.new(1, 0)
+	banner.Position = UDim2.new(1, -4, 0, 0)
+	banner.BackgroundColor3 = color or Color3.fromRGB(80, 80, 90)
+	banner.BackgroundTransparency = 0.08
+	banner.BorderSizePixel = 0
+	banner.AutomaticSize = Enum.AutomaticSize.Y
+	banner.LayoutOrder = -os.clock()
+	banner.Parent = container
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = banner
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = color or Color3.fromRGB(200, 200, 200)
+	stroke.Thickness = 1
+	stroke.Transparency = 0.2
+	stroke.Parent = banner
+
+	local title = Instance.new("TextLabel")
+	title.Name = "TitleText"
+	title.Size = UDim2.new(1, -20, 0, 24)
+	title.Position = UDim2.new(0, 10, 0, 8)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 15
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Text = titleText
+	title.TextWrapped = true
+	title.Parent = banner
+
+	local body = Instance.new("TextLabel")
+	body.Name = "BodyText"
+	body.Size = UDim2.new(1, -20, 0, 34)
+	body.Position = UDim2.new(0, 10, 0, 32)
+	body.BackgroundTransparency = 1
+	body.Font = Enum.Font.Gotham
+	body.TextSize = 13
+	body.TextColor3 = Color3.fromRGB(235, 235, 235)
+	body.TextXAlignment = Enum.TextXAlignment.Left
+	body.TextYAlignment = Enum.TextYAlignment.Top
+	body.TextWrapped = true
+	body.Text = bodyText
+	body.Parent = banner
+
+	task.delay(duration or 6, function()
+		if banner.Parent then banner:Destroy() end
+	end)
 	return banner
 end
 
@@ -286,6 +349,27 @@ Net.On("DiplomacyUpdate", function(data)
 			end
 		end
 	end
+end)
+
+-- VICTORY: Spieler eliminiert.
+Net.On("PlayerEliminated", function(payload)
+	if not payload then return end
+	local name = payload.playerName or "Ein Spieler"
+	local reason = payload.reason or "Hauptstadt verloren"
+	pushSimpleBanner("💀 " .. name .. " wurde eliminiert!", reason, Color3.fromRGB(160, 50, 50), 7)
+end)
+
+-- VICTORY: Sieg verkündet.
+Net.On("VictoryAchieved", function(payload)
+	if not payload then return end
+	local winnerType = payload.winnerType == "alliance" and "ALLIANZ" or "SOLO"
+	local title = "🏆 SIEG (" .. winnerType .. ")!"
+	local body = payload.winnerName .. " hat mit " .. tostring(payload.finalPoints or 0) .. " Punkten gewonnen!"
+	pushSimpleBanner(title, body, Color3.fromRGB(200, 160, 30), 12)
+	-- Tutorial/Victory-GUI oeffnen.
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local victoryGui = playerGui and playerGui:FindFirstChild("VictoryGui")
+	if victoryGui then victoryGui.Enabled = true end
 end)
 
 print("[NotificationGuiController] Bereit.")
