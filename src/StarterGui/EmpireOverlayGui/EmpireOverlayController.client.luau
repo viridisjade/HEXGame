@@ -126,6 +126,20 @@ local function addCorner(obj, radius)
 	c.Parent = obj
 end
 
+-- Diplomatie-Toggle-Zustand. FALSE initialisiert, damit der ERSTE Klick das
+-- Fenster OEFNET (und nicht schliesst).
+local diplomacyOpen = false
+
+-- Setzt das Fenster absolut auf open/close und haelt den Tracked-Zustand sync.
+-- Quelle der Wahrheit ist die tatsaechliche GUI (dipGui.Enabled + overlay.Visible),
+-- damit der CloseButton des DiplomacyGuiController das Fenster nicht "dedupelt".
+local function applyDiplomacyOpen(dipGui, overlay, open)
+	open = (open == true)
+	diplomacyOpen = open
+	if dipGui then dipGui.Enabled = open end
+	if overlay then overlay.Visible = open end
+end
+
 diplomacyButton.Activated:Connect(function()
 	local PlayersService = game:GetService("Players")
 	local playerGui = PlayersService.LocalPlayer and PlayersService.LocalPlayer:FindFirstChild("PlayerGui")
@@ -140,9 +154,10 @@ diplomacyButton.Activated:Connect(function()
 		dipGui.ResetOnSpawn = false
 		dipGui.DisplayOrder = 20
 		dipGui.Parent = playerGui
+		-- Zu Beginn geschlossen: Enabled=false, damit der ERSTE Klick oeffnet.
+		dipGui.Enabled = false
 		print("[EmpireOverlay] DiplomacyGui fehlte - Platzhalter-ScreenGui erstellt")
 	end
-	dipGui.Enabled = true
 
 	-- 2) DiplomacyOverlay Frame sicherstellen (Platzhalter bei Bedarf).
 	local overlay = dipGui:FindFirstChild("DiplomacyOverlay")
@@ -155,6 +170,9 @@ diplomacyButton.Activated:Connect(function()
 		overlay.BackgroundColor3 = Color3.fromRGB(10, 10, 16)
 		overlay.BackgroundTransparency = 0.12
 		overlay.BorderSizePixel = 0
+		-- Zu Beginn unsichtbar (Visible=true waere ein Default und liesse beim
+		-- ersten Klick das Fenster als "offen" erscheinen).
+		overlay.Visible = false
 		overlay.Parent = dipGui
 		addCorner(overlay, 12)
 
@@ -182,22 +200,23 @@ diplomacyButton.Activated:Connect(function()
 		addCorner(closeButton)
 
 		closeButton.Activated:Connect(function()
-			overlay.Visible = false
+			applyDiplomacyOpen(dipGui, overlay, false)
 		end)
 
 		print("[EmpireOverlay] DiplomacyOverlay fehlte - Platzhalter-Frame gebaut")
 	end
 
-	-- 3) Toggle: "offen" = ScreenGui aktiv UND Overlay sichtbar.
-	local isOpen = dipGui.Enabled and overlay.Visible
-	if isOpen then
-		overlay.Visible = false
-		dipGui.Enabled = false
-		print("[EmpireOverlay] Diplomatie-Fenster geschlossen")
-	else
-		dipGui.Enabled = true
-		overlay.Visible = true
+	-- 3) Toggle: Zustand AUS der tatsaechlichen GUI ableiten (nicht aus einer
+	--    ggf. veralteten Variable) und umschalten. So verhaelt sich der Button
+	--    korrekt, auch wenn das Fenster ueber den CloseButton des
+	--    DiplomacyGuiController geschlossen wurde.
+	local wasOpen = dipGui.Enabled and overlay.Visible
+	local willOpen = not wasOpen
+	applyDiplomacyOpen(dipGui, overlay, willOpen)
+	if willOpen then
 		print("[EmpireOverlay] Diplomatie-Fenster geöffnet")
+	else
+		print("[EmpireOverlay] Diplomatie-Fenster geschlossen")
 	end
 
 	-- Event feuern (Controller laedt beim Oeffnen Daten nach).
