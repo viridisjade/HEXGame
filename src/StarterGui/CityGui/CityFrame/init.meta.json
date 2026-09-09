@@ -1,45 +1,32 @@
 {
-  "ignoreUnknownInstances": true,
   "properties": {
-    "BackgroundTransparency": 0.4000000059604645,
-    "BorderSizePixel": 0.0,
-    "Position": {
-      "UDim2": [
-        [
-          0.36287978,
-          0
-        ],
-        [
-          0.1262714,
-          0
-        ]
-      ]
-    },
-    "BackgroundColor3": [
-      0.15294118225574493,
-      0.6352941393852234,
-      0.3803921937942505
-    ],
-    "Sink": {
-      "Enum": 0
-    },
     "Size": {
       "UDim2": [
         [
-          0.27339095,
+          0.381828,
           0
         ],
         [
-          0.20480855,
+          0.19980602,
           0
         ]
       ]
     },
-    "BorderColor3": [
-      0.0,
-      0.0,
-      0.0
-    ]
+    "Sink": {
+      "Enum": 0
+    },
+    "Position": {
+      "UDim2": [
+        [
+          0.3190914,
+          0
+        ],
+        [
+          0.047526672,
+          0
+        ]
+      ]
+    }
   },
   "className": "Frame"
 }

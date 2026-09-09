@@ -62,21 +62,22 @@
         },
         "$path": "src/StarterGui/EmpireOverlayGui"
       },
-      "NotificationGui": {
-        "$className": "ScreenGui",
-        "$properties": {
-          "ResetOnSpawn": false,
-          "IgnoreGuiInset": true,
-          "ZIndexBehavior": "Sibling"
-        },
-        "$path": "src/StarterGui/NotificationGui"
-      },
       "MovementGui": {
         "$className": "ScreenGui",
         "$properties": {
           "ZIndexBehavior": "Sibling"
         },
         "$path": "src/StarterGui/MovementGui"
+      },
+      "NotificationGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "IgnoreGuiInset": true,
+          "ResetOnSpawn": false,
+          "ScreenInsets": "DeviceSafeInsets",
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/NotificationGui"
       },
       "RoundTimerGui": {
         "$className": "ScreenGui",
@@ -101,16 +102,6 @@
         },
         "$path": "src/StarterGui/TechTreeGui"
       },
-      "VictoryGui": {
-        "$className": "ScreenGui",
-        "$properties": {
-          "Enabled": false,
-          "ResetOnSpawn": false,
-          "IgnoreGuiInset": true,
-          "ZIndexBehavior": "Sibling"
-        },
-        "$path": "src/StarterGui/VictoryGui"
-      },
       "TestGui": {
         "$className": "ScreenGui",
         "$properties": {
@@ -124,6 +115,17 @@
           "ZIndexBehavior": "Sibling"
         },
         "$path": "src/StarterGui/UnitTestGui"
+      },
+      "VictoryGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "IgnoreGuiInset": true,
+          "ResetOnSpawn": false,
+          "ScreenInsets": "DeviceSafeInsets",
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/VictoryGui"
       },
       "$properties": {
         "ScreenOrientation": "Sensor"
