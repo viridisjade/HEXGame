@@ -9,9 +9,15 @@
     entsprechend dem Sicht-Zustand des Spielers.
 
     ZUSTAENDE (siehe FogOfWarConfig.STATE):
-        unexplored  -> alles Transparency = 1 (unsichtbar)
+        unexplored  -> echtes Hex unsichtbar, stattdessen FOG-Model-Platzhalter
         explored    -> Terrain/Soil/Gebaeude/Province = 0.5, KEINE Units
         visible     -> Terrain/Soil/Gebaeude = 0, Province = 0.5, Units = 0
+
+    FOG-MODELS:
+        - Rein CLIENTSEITIG (FilteringEnabled -> keine Replikation an andere
+          Clients/Server). Der Server spawnt keine FOG-Models.
+        - Lokaler Ordner workspace > FogModels. Bei Spielstart werden fuer ALLE
+          Hexes FOG-Models gespawnt; erkundete/sichtbare Felder entfernen sie.
 
     REGELN:
         - BaseParts/MeshParts/Union haben KEIN .Visible - es wird NUR
@@ -106,6 +112,98 @@ local function applyTransparency(model, t)
 end
 
 --------------------------------------------------------------------------------
+-- FOG-MODELS (Platzhalter fuer unerforschte Hexes)
+--
+-- Rein CLIENTSEITIG. Der Server spawnt keine FOG-Models und weiss nichts
+-- davon. Der FogModels-Ordner liegt unter workspace und ist nur auf diesem
+-- Client sichtbar (FilteringEnabled -> keine Replikation an andere Clients).
+--------------------------------------------------------------------------------
+local fogFolder = nil
+
+local function getFogFolder()
+	if fogFolder and fogFolder.Parent then return fogFolder end
+	fogFolder = workspace:FindFirstChild("FogModels")
+	if not fogFolder then
+		fogFolder = Instance.new("Folder")
+		fogFolder.Name = "FogModels"
+		fogFolder.Parent = workspace
+	end
+	return fogFolder
+end
+
+-- FOG-Template: bevorzugt ReplicatedStorage > HexTemplates > FOG, sonst
+-- direkt ReplicatedStorage > FOG.
+local function getFogTemplate()
+	local hexTemplates = ReplicatedStorage:FindFirstChild("HexTemplates")
+	local t = hexTemplates and hexTemplates:FindFirstChild("FOG")
+	if not t then
+		t = ReplicatedStorage:FindFirstChild("FOG")
+	end
+	return t
+end
+
+-- SpawnFogModel(q, r): klont das FOG-Model, positioniert es auf dem Hex
+-- (Boden auf SPAWN_Y, gleiche Hoehe wie echte Hexes) und legt es in den
+-- lokalen FogModels-Ordner.
+local function SpawnFogModel(q, r)
+	local template = getFogTemplate()
+	if not template then return end
+
+	local folder = getFogFolder()
+	local name = "Fog_" .. q .. "_" .. r
+	if folder:FindFirstChild(name) then return end
+
+	local fog = template:Clone()
+	fog.Name = name
+
+	local worldPos = HexGridConfig.axialToWorld(q, r)
+
+	if fog:IsA("Model") then
+		local bboxCf, bboxSize = fog:GetBoundingBox()
+		local pivot = fog:GetPivot()
+		local pivotToBottom = pivot.Position.Y - (bboxCf.Position.Y - bboxSize.Y / 2)
+		local targetPivotY = worldPos.Y + pivotToBottom
+		local rotation = pivot - pivot.Position
+		fog:PivotTo(CFrame.new(worldPos.X, targetPivotY, worldPos.Z) * rotation)
+	elseif fog:IsA("BasePart") then
+		fog.Position = Vector3.new(worldPos.X, worldPos.Y + fog.Size.Y / 2, worldPos.Z)
+	end
+
+	fog.Parent = folder
+end
+
+-- RemoveFogModel(q, r): loescht das FOG-Model (falls vorhanden).
+local function RemoveFogModel(q, r)
+	local folder = getFogFolder()
+	local fog = folder:FindFirstChild("Fog_" .. q .. "_" .. r)
+	if fog then fog:Destroy() end
+end
+
+-- forEachHex(callback): ruft callback(q, r) fuer jedes Hex-Model auf der Karte
+-- auf (durchsucht die Terrain-/Hex-Folder im HexMap-Ordner).
+local function forEachHex(callback)
+	if not hexMapFolder then return end
+	for _, child in ipairs(hexMapFolder:GetChildren()) do
+		if child:IsA("Folder") and not SPECIAL_FOLDERS[child.Name] then
+			for _, obj in ipairs(child:GetChildren()) do
+				local q, r = string.match(obj.Name, "^Hex_(%-?%d+)_(%-?%d+)$")
+				if q and r then callback(tonumber(q), tonumber(r)) end
+			end
+		end
+	end
+end
+
+-- spawnAllFog(): klare alte FOG-Models und lege fuer JEDES Hex ein neues an.
+local function spawnAllFog()
+	refreshFolders()
+	local folder = getFogFolder()
+	for _, child in ipairs(folder:GetChildren()) do
+		child:Destroy()
+	end
+	forEachHex(function(q, r) SpawnFogModel(q, r) end)
+end
+
+--------------------------------------------------------------------------------
 -- MODELL-LOOKUP (pro Hex)
 --------------------------------------------------------------------------------
 local function findTerrainModel(q, r)
@@ -169,9 +267,15 @@ local function setHexState(key, state)
 	if state == FogOfWarConfig.STATE.VISIBLE then
 		t = 0              -- sichtbar: voll
 		provinceT = 0.5    -- ProvinceHex bleibt halb transparent
+		RemoveFogModel(q, r)   -- FOG-Platzhalter entfernen, echtes Hex sichtbar
 	elseif state == FogOfWarConfig.STATE.EXPLORED then
 		t = 0.5            -- erkundet: Geister-Look
 		provinceT = 0.5
+		RemoveFogModel(q, r)   -- FOG entfernen, echtes Hex 50% sichtbar
+	else
+		-- unexplored: echtes Hex unsichtbar, stattdessen FOG-Platzhalter.
+		-- SpawnFogModel ist idempotent (ueberspringt bereits vorhandene Models).
+		SpawnFogModel(q, r)
 	end
 
 	applyTransparency(findTerrainModel(q, r), t)
@@ -335,6 +439,19 @@ local function connectArmyWatcher(folder)
 	pcall(updateArmyVisibility)
 end
 
+-- Neu eintreffende Hex-Modelle (asynchrone Replikation) abdecken: FOG-Model
+-- spawnen bzw. echten Hex sichtbar/erkundet setzen.
+local function connectHexWatcher(folder)
+	if not folder then return end
+	folder.ChildAdded:Connect(function(child)
+		if not child then return end
+		local q, r = string.match(child.Name, "^Hex_(%-?%d+)_(%-?%d+)$")
+		if q and r then
+			setHexState(q .. "_" .. r, getState(q .. "_" .. r))
+		end
+	end)
+end
+
 local function setupHexMapWatchers()
 	refreshFolders()
 	if not hexMapFolder then return end
@@ -342,12 +459,21 @@ local function setupHexMapWatchers()
 	connectBuildingsWatcher(hexMapFolder:FindFirstChild("Buildings"))
 	connectArmyWatcher(hexMapFolder:FindFirstChild("ArmyModels"))
 
+	-- Terrain-/Hex-Folder: neu eintreffende Hex-Modelle abdecken.
+	for _, child in ipairs(hexMapFolder:GetChildren()) do
+		if child:IsA("Folder") and not SPECIAL_FOLDERS[child.Name] then
+			connectHexWatcher(child)
+		end
+	end
+
 	-- Falls die Folder erst nach dem Map-Spawn (lazy) angelegt werden.
 	hexMapFolder.ChildAdded:Connect(function(child)
 		if child.Name == "Buildings" and child:IsA("Folder") then
 			connectBuildingsWatcher(child)
 		elseif child.Name == "ArmyModels" and child:IsA("Folder") then
 			connectArmyWatcher(child)
+		elseif child:IsA("Folder") and not SPECIAL_FOLDERS[child.Name] then
+			connectHexWatcher(child)
 		end
 	end)
 end
@@ -376,10 +502,11 @@ task.spawn(function()
 		task.wait(0.5)
 	end
 	hideEverything()
+	spawnAllFog()
 	setupHexMapWatchers()
 	mapReady = true
 	finishInitIfReady()
-	print("[Fog] Initialisierung: Alles unsichtbar, HexMap bereit.")
+	print("[Fog] Initialisierung: Alles unsichtbar, FOG-Models gespawnt, HexMap bereit.")
 end)
 
 --------------------------------------------------------------------------------
@@ -407,8 +534,9 @@ workspace.ChildAdded:Connect(function(child)
 		visibleSet = {}
 		exploredSet = {}
 		hideEverything()
+		spawnAllFog()
 		setupHexMapWatchers()
-		print("[Fog] HexMap neu erstellt - alles wieder versteckt.")
+		print("[Fog] HexMap neu erstellt - alles wieder versteckt, FOG-Models neu gespawnt.")
 	end
 end)
 
