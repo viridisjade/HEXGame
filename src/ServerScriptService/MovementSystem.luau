@@ -355,13 +355,23 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 			-- onto the hex later (see CombatSystem.EndCombat).
 			local stopStep = endStep - 1
 			if stopStep > startStep then
-				local stopHex = path[stopStep]
-				if stopHex and ArmySystem.MoveArmy(armyId, stopHex.q, stopHex.r) then
-					ArmyModelMover.MoveModelAlongPath(armyId, path, startStep, stopStep)
+				-- FOG OF WAR: Hex für Hex bis zum letzten freien Hex vorrücken und
+				-- die Sicht nach JEDEM Schritt aktualisieren (alle Zwischen-Hexes
+				-- inkl. Sight-Radius werden aufgedeckt).
+				local stepDelay = ArmyModelMover.Config.STEP_DELAY or 0.35
+				for i = startStep + 1, stopStep do
+					local hex = path[i]
+					if hex and ArmySystem.MoveArmy(armyId, hex.q, hex.r) then
+						ArmyModelMover.MoveModelToHex(armyId, hex.q, hex.r)
+						pcall(FogOfWarSystem.UpdateVision, army.owner)
+					end
+					if i < stopStep then
+						task.wait(stepDelay)
+					end
 				end
 			end
 
-			-- Fog of War: Sicht des Besitzers aktualisieren (Armee steht neu).
+			-- Fog of War: Sicht des Besitzers final aktualisieren (Armee steht neu).
 			pcall(FogOfWarSystem.UpdateVision, army.owner)
 
 			ArmyStats.SpendMovement(armyId, spentCost)
@@ -389,21 +399,25 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 		end
 	end
 
-	local moveSuccess = ArmySystem.MoveArmy(armyId, finalHex.q, finalHex.r)
-
-	if not moveSuccess then
-		warn("[MovementSystem] MoveArmy fehlgeschlagen für Army " .. armyId)
-		return 0
-	end
-
 	-- Bewegungspunkte VERBRAUCHEN
 	ArmyStats.SpendMovement(armyId, spentCost)
 
-	-- Model visuell bewegen (animiert) – ebenfalls mit ABSOLUTEN Indizes
-	ArmyModelMover.MoveModelAlongPath(armyId, path, startStep, endStep)
-
-	-- Fog of War: Sicht des Besitzers aktualisieren (Armee hat sich bewegt).
-	pcall(FogOfWarSystem.UpdateVision, army.owner)
+	-- FOG OF WAR: Armee bewegt sich Hex für Hex entlang des Pfades. Die Sicht
+	-- wird NACH JEDEM einzelnen Schritt aktualisiert (nicht nur am Ziel), damit
+	-- ALLE Zwischen-Hexes inkl. Sight-Radius aufgedeckt werden.
+	local stepDelay = ArmyModelMover.Config.STEP_DELAY or 0.35
+	for i = startStep + 1, endStep do
+		local hex = path[i]
+		if not hex or not ArmySystem.MoveArmy(armyId, hex.q, hex.r) then
+			warn("[MovementSystem] MoveArmy fehlgeschlagen für Army " .. armyId .. " (Schritt " .. i .. ")")
+			return 0
+		end
+		ArmyModelMover.MoveModelToHex(armyId, hex.q, hex.r)
+		pcall(FogOfWarSystem.UpdateVision, army.owner)
+		if i < endStep then
+			task.wait(stepDelay)
+		end
+	end
 
 	-- OrderData aktualisieren (ABSOLUTER Fortschritt)
 	local order = MovementOrderData.GetOrder(armyId)
