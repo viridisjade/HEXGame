@@ -57,11 +57,43 @@ local function fire(player, remoteName, payload)
 end
 
 --------------------------------------------------------------------------------
--- SICHTBEREICH (Radius-Suche ueber das Hex-Grid)
+-- TERRAIN-HOEHE EINES HEXES (0 wenn unbekannt/nicht gespawnt)
+--------------------------------------------------------------------------------
+local function getTerrainHeightAt(q, r)
+	local hex = HexData.GetHex(q, r)
+	return hex and HexUtils.GetTerrainHeight(hex.terrain) or 0
+end
+
+--------------------------------------------------------------------------------
+-- SICHTLINIEN-CHECK (Terrain-basiert)
+--------------------------------------------------------------------------------
+-- Laeuft die Hex-Linie von der Quelle zum Ziel ab. Sobald ein Hex auf dem
+-- Weg (ausser der Quelle selbst) 2+ Ebenen hoeher ist als die Quelle,
+-- blockiert es die Sicht - das Ziel UND alles dahinter ist unsichtbar.
+--------------------------------------------------------------------------------
+local function isVisibleAlongLine(sourceQ, sourceR, sourceHeight, targetQ, targetR)
+	local line = HexUtils.getLine(sourceQ, sourceR, targetQ, targetR)
+
+	for _, hex in ipairs(line) do
+		if not (hex.q == sourceQ and hex.r == sourceR) then
+			local hexHeight = getTerrainHeightAt(hex.q, hex.r)
+			if hexHeight >= sourceHeight + 2 then
+				return false -- ABBRUCH: dieses Hex blockiert die Sicht
+			end
+		end
+	end
+
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- SICHTBEREICH (Radius-Suche ueber das Hex-Grid + Sichtlinien-Blockade)
 --------------------------------------------------------------------------------
 local function collectVisibleHexes(q, r, sight, outSet)
 	if not outSet then return end
 	if sight < 0 then return end
+
+	local sourceHeight = getTerrainHeightAt(q, r)
 
 	local queue = { { q = q, r = r, d = 0 } }
 	local visited = { [HexUtils.coordToKey(q, r)] = true }
@@ -72,11 +104,24 @@ local function collectVisibleHexes(q, r, sight, outSet)
 		head = head + 1
 
 		local key = HexUtils.coordToKey(cur.q, cur.r)
+
 		-- Nur existierende (gespawnte) Hexes koennen sichtbar werden.
 		if HexData.HasHex(cur.q, cur.r) then
-			outSet[key] = true
+			-- Bereits durch eine andere Quelle sichtbare Hexes muessen
+			-- nicht erneut geprueft werden (Optimierung).
+			if not outSet[key] then
+				if cur.q == q and cur.r == r then
+					-- Die Quelle selbst sieht immer sich selbst.
+					outSet[key] = true
+				elseif isVisibleAlongLine(q, r, sourceHeight, cur.q, cur.r) then
+					outSet[key] = true
+				end
+			end
 		end
 
+		-- Der Radius (Reichweite der Sichtquelle) wird weiterhin per
+		-- Distanz bestimmt - die Sichtlinien-Blockade filtert danach nur
+		-- noch aus, was tatsaechlich sichtbar ist.
 		if cur.d < sight then
 			for _, n in ipairs(HexUtils.getNeighbors(cur.q, cur.r)) do
 				local nk = HexUtils.coordToKey(n.q, n.r)

@@ -71,19 +71,14 @@ end
 --   Ebene2          -> 2
 --   Ebene3_Gebirge  -> 3
 --   Ebene4_Bergspitze -> 4
+--
+-- Die eigentliche Tabelle liegt jetzt zentral in HexUtils.GetTerrainHeight,
+-- damit FogOfWarSystem (Sichtlinien-Blockade) dieselbe Hoehen-Zuordnung
+-- verwendet, ohne einen zirkulaeren require (FogOfWarSystem <-> MovementSystem)
+-- zu erzeugen.
 --------------------------------------------------------------------------------
-local TERRAIN_HEIGHTS = {
-	Water = 0,
-	Ebene1 = 1,
-	Ebene2 = 2,
-	Ebene3_Gebirge = 3,
-	Ebene4_Bergspitze = 4,
-	Ebene0 = 0,
-	Unknown = 0,
-}
-
 function MovementSystem.GetTerrainHeight(terrainType)
-	return TERRAIN_HEIGHTS[terrainType] or 0
+	return HexUtils.GetTerrainHeight(terrainType)
 end
 
 --------------------------------------------------------------------------------
