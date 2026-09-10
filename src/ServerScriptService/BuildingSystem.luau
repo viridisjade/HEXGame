@@ -30,9 +30,10 @@ local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
 --------------------------------------------------------------------------------
 -- KONFIGURATION
 --------------------------------------------------------------------------------
+-- HINWEIS: Die Spawn-Höhe kommt jetzt zentral aus HexHeightUtil.getSpawnHeight
+-- (Terrain-Oberkante + 0.5 Studs). HEIGHT_OFFSET bleibt als Kompatibilitätswert.
 BuildingSystem.Config = {
-	-- Kleiner visueller Abstand über dem Boden
-	HEIGHT_OFFSET = 0.2,
+	HEIGHT_OFFSET = HexHeightUtil.SPAWN_HEIGHT_OFFSET,
 }
 
 --------------------------------------------------------------------------------
@@ -153,22 +154,23 @@ function BuildingSystem.placeBuildingModel(buildingType, q, r)
 	local folder = BuildingSystem.getBuildingsFolder()
 	model.Parent = folder
 
+	-- Position dynamisch anhand der tatsächlichen Terrain-Höhe (Soil/Gebäude/
+	-- Hex-Modell), NICHT anhand einer festen SPAWN_Y.
 	local worldPos = HexUtils.axialToWorld(q, r)
-	local topY = HexHeightUtil.getTopY(q, r)
-	local extraY = BuildingSystem.Config.HEIGHT_OFFSET
+	local spawnY = HexHeightUtil.getSpawnHeight(q, r)
 
 	if model:IsA("Model") then
 		local bboxCf, bboxSize = model:GetBoundingBox()
 		local pivot = model:GetPivot()
 
 		local pivotToBottom = pivot.Position.Y - (bboxCf.Position.Y - bboxSize.Y / 2)
-		local targetPivotY = topY + extraY + pivotToBottom
+		local targetPivotY = spawnY + pivotToBottom
 
 		local rotation = pivot - pivot.Position
 		model:PivotTo(CFrame.new(worldPos.X, targetPivotY, worldPos.Z) * rotation)
 	elseif model:IsA("BasePart") then
 		local halfY = model.Size.Y / 2
-		model.Position = Vector3.new(worldPos.X, topY + extraY + halfY, worldPos.Z)
+		model.Position = Vector3.new(worldPos.X, spawnY + halfY, worldPos.Z)
 	end
 
 	return model

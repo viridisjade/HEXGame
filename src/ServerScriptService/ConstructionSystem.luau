@@ -88,17 +88,19 @@ local function placeModel(buildingType, q, r, isGhost)
 	object.Name = (isGhost and "Ghost_" or "") .. buildingType .. "_" .. q .. "_" .. r
 	object.Parent = getWorkspaceBuildings()
 
+	-- Position dynamisch anhand der tatsächlichen Terrain-Höhe (Soil/Gebäude/
+	-- Hex-Modell), NICHT anhand einer festen SPAWN_Y.
 	local worldPos = HexUtils.axialToWorld(q, r)
-	local topY = HexHeightUtil.getTopY(q, r)
+	local spawnY = HexHeightUtil.getSpawnHeight(q, r)
 
 	if object:IsA("Model") then
 		local bboxCf, bboxSize = object:GetBoundingBox()
 		local pivot = object:GetPivot()
 		local pivotToBottom = pivot.Position.Y - (bboxCf.Position.Y - bboxSize.Y / 2)
 		local rotation = pivot - pivot.Position
-		object:PivotTo(CFrame.new(worldPos.X, topY + 0.2 + pivotToBottom, worldPos.Z) * rotation)
+		object:PivotTo(CFrame.new(worldPos.X, spawnY + pivotToBottom, worldPos.Z) * rotation)
 	elseif object:IsA("BasePart") then
-		object.Position = Vector3.new(worldPos.X, topY + 0.2 + object.Size.Y / 2, worldPos.Z)
+		object.Position = Vector3.new(worldPos.X, spawnY + object.Size.Y / 2, worldPos.Z)
 	end
 
 	if isGhost then

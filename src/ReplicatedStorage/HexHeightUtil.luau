@@ -89,4 +89,17 @@ function HexHeightUtil.getTopY(q, r)
 	return topY
 end
 
+--------------------------------------------------------------------------------
+-- getSpawnHeight(q, r) -> number
+-- Spawn-Höhe für Units und Gebäude: Oberkante des Hexes (Soil/Gebäude/Hex-
+-- Modell, je nachdem was am höchsten ist) + fester Sicherheitsabstand, damit
+-- nichts im Terrain versinkt und nichts sichtbar darüber schwebt.
+--------------------------------------------------------------------------------
+HexHeightUtil.SPAWN_HEIGHT_OFFSET = 0.5
+
+function HexHeightUtil.getSpawnHeight(q, r)
+	local topY = HexHeightUtil.getTopY(q, r)
+	return topY + HexHeightUtil.SPAWN_HEIGHT_OFFSET
+end
+
 return HexHeightUtil
