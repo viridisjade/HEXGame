@@ -230,6 +230,43 @@ function CityData.HasBuildingOnHex(cityId, q, r)
 end
 
 --------------------------------------------------------------------------------
+-- RemoveBuilding(cityId, buildingId) -> buildingType | nil
+-- Entfernt ein Gebäude aus city.buildings (z.B. bei Zerstörung). Gibt den
+-- buildingType des entfernten Eintrags zurück, damit Aufrufer z.B.
+-- Job-Slots reduzieren können.
+--------------------------------------------------------------------------------
+function CityData.RemoveBuilding(cityId, buildingId)
+	local city = cities[cityId]
+	if not city or not city.buildings then return nil end
+
+	for i, entry in ipairs(city.buildings) do
+		if entry.buildingId == buildingId then
+			local buildingType = entry.buildingType
+			table.remove(city.buildings, i)
+			return buildingType
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- GetCityByBuilding(buildingId) -> cityId | nil
+-- Findet die Stadt, zu der ein Gebäude gehört (für Zerstörung nötig).
+--------------------------------------------------------------------------------
+function CityData.GetCityByBuilding(buildingId)
+	for cityId, city in pairs(cities) do
+		if city.buildings then
+			for _, entry in ipairs(city.buildings) do
+				if entry.buildingId == buildingId then
+					return cityId
+				end
+			end
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
 -- BUILD QUEUE
 -- Es wird immer nur der erste Auftrag der Queue aktiv mit Industry versorgt.
 --------------------------------------------------------------------------------

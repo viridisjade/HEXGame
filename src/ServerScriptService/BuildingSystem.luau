@@ -26,6 +26,17 @@ local BuildingData = require(script.Parent:WaitForChild("BuildingData"))
 local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
 local CampData = require(script.Parent:WaitForChild("CampData"))
 local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
+local CityData = require(script.Parent:WaitForChild("CityData"))
+local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
+
+-- buildingType -> Job-Typ, der beim Bau/Abriss dieses Gebäudetyps
+-- Arbeitsplätze bereitstellt (muss mit ConstructionSystem übereinstimmen).
+local JOB_TYPE_MAP = {
+	Farm = "farmer",
+	Factory = "worker",
+	Market = "trader",
+	Laboratory = "scientist",
+}
 
 --------------------------------------------------------------------------------
 -- KONFIGURATION
@@ -276,6 +287,20 @@ function BuildingSystem.DestroyBuilding(buildingId)
 
 	-- Aus Daten entfernen
 	BuildingData.RemoveBuilding(buildingId)
+
+	-- CityData konsistent halten: Gebäude aus city.buildings entfernen und
+	-- den zugehörigen Job-Slot abbauen. Bürger, die dadurch ohne Job
+	-- dastehen, werden arbeitslos und anschließend von AutoAssignWorkers
+	-- auf andere freie Plätze verteilt (falls vorhanden).
+	local cityId = CityData.GetCityByBuilding(buildingId)
+	if cityId then
+		local removedType = CityData.RemoveBuilding(cityId, buildingId)
+		local jobType = removedType and JOB_TYPE_MAP[removedType]
+		if jobType then
+			CityEconomySystem.RemoveJobSlot(cityId, jobType, 1)
+		end
+		CityEconomySystem.AutoAssignWorkers(cityId)
+	end
 
 	print("[BuildingSystem] Gebäude " .. buildingId .. " zerstört")
 	return true

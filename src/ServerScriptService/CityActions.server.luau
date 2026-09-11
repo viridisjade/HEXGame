@@ -122,6 +122,14 @@ onEvent("RequestMoveCitizen", function(player, cityId, fromJob, toJob)
 
 	if success then
 		print("[CityActions] " .. player.Name .. ": " .. tostring(fromJob) .. " -> " .. tostring(toJob))
+
+		-- Nach der manuellen Verschiebung koennen an anderer Stelle noch
+		-- freie Plaetze + arbeitslose Buerger uebrig sein (z.B. wenn der
+		-- Spieler einen Farmer zu Scientist verschiebt und der frei
+		-- gewordene Farmer-Platz durch einen arbeitslosen Buerger gefuellt
+		-- werden kann). Das ueberschreibt NICHT die manuelle Wahl des
+		-- Spielers, sondern fuellt nur zusaetzliche Luecken.
+		CityEconomySystem.AutoAssignWorkers(cityId)
 	else
 		warn("[CityActions] Verschiebung fehlgeschlagen: " .. tostring(reason))
 	end

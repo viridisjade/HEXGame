@@ -382,6 +382,9 @@ function ConstructionSystem.ProcessAllConstruction()
 						local newJob = jobTypeMap[order.buildingType]
 						if newJob then
 							CityEconomySystem.AddJobSlot(cityId, newJob, 1)
+							-- Neuer Arbeitsplatz entstanden: arbeitslose Bürger sofort
+							-- zuweisen (Priorität Farmer > Worker > Trader > Scientist).
+							CityEconomySystem.AutoAssignWorkers(cityId)
 						end
 
 						local hex = HexData.GetHex(order.q, order.r)
