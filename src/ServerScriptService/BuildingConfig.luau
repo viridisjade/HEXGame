@@ -98,11 +98,11 @@ BuildingConfig.Buildings = {
 --------------------------------------------------------------------------------
 -- COST_SCALE_PER_BUILDING
 -- Mit jedem Gebäude, das eine Stadt bereits besitzt, steigen die
--- Industrie-Kosten für das NÄCHSTE Gebäude um diesen Faktor (5%).
+-- Industrie-Kosten für das NÄCHSTE Gebäude um diesen Faktor (40%).
 -- tatsächlicheKosten = basisKosten * (1 + COST_SCALE_PER_BUILDING * anzahlGebäude)
 -- Siehe BuildingCostSystem.GetBuildingCost für die tatsächliche Berechnung.
 --------------------------------------------------------------------------------
-BuildingConfig.COST_SCALE_PER_BUILDING = 0.05
+BuildingConfig.COST_SCALE_PER_BUILDING = 0.40
 
 --------------------------------------------------------------------------------
 -- Ordner-Name in ServerStorage
