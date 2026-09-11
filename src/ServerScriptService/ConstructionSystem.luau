@@ -200,7 +200,7 @@ function ConstructionSystem.StartConstruction(player, cityId, buildingType, q, r
 		end
 	end
 
-	print("[ConstructionSystem] " .. buildingType .. " kostet " .. actualCost .. " (Base: " .. config.IndustryCost .. ", Aufschlag: +" .. BuildingCostSystem.GetMarkupPercent(cityId) .. "%)")
+	print("[ConstructionSystem] " .. buildingType .. " kostet " .. actualCost .. " (Base: " .. config.IndustryCost .. ", Stufe " .. BuildingCostSystem.GetStage(cityId) .. ", x" .. string.format("%.1f", BuildingCostSystem.GetMultiplier(cityId)) .. ")")
 
 	local order = CityData.AddBuildOrder(cityId, {
 		orderType = "Building",

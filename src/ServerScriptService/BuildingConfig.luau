@@ -96,13 +96,54 @@ BuildingConfig.Buildings = {
 }
 
 --------------------------------------------------------------------------------
--- COST_SCALE_PER_BUILDING
--- Mit jedem Gebäude, das eine Stadt bereits besitzt, steigen die
--- Industrie-Kosten für das NÄCHSTE Gebäude um diesen Faktor (40%).
--- tatsächlicheKosten = basisKosten * (1 + COST_SCALE_PER_BUILDING * anzahlGebäude)
--- Siehe BuildingCostSystem.GetBuildingCost für die tatsächliche Berechnung.
+-- STUFEN-SYSTEM (exponentiell)
+-- Ersetzt die alte lineare Skalierung. Mit steigender Gebäudeanzahl
+-- springt die Stadt in höhere "Stufen", die jeweils einen höheren
+-- (exponentiell wachsenden) Kosten-Multiplikator haben.
+--
+-- Stufe 1:  1–2 Gebäude    → ×1.0
+-- Stufe 2:  3–4 Gebäude    → ×1.6
+-- Stufe 3:  5–10 Gebäude   → ×2.7
+-- Stufe 4:  11–15 Gebäude  → ×4.1
+-- Stufe 5:  16–20 Gebäude  → ×5.8
+-- ... (Stufe steigt danach alle 5 Gebäude um 1, kein Maximum)
+--
+-- tatsächlicheKosten = math.ceil(basisKosten * GetMultiplier(GetStage(anzahlGebäude)))
+-- Siehe BuildingCostSystem.GetCost für die tatsächliche Berechnung.
 --------------------------------------------------------------------------------
-BuildingConfig.COST_SCALE_PER_BUILDING = 0.40
+
+--------------------------------------------------------------------------------
+-- GetStage(buildingCount) -> number
+-- Berechnet die aktuelle Stufe anhand der Gebäudeanzahl.
+--------------------------------------------------------------------------------
+function BuildingConfig.GetStage(buildingCount)
+	buildingCount = tonumber(buildingCount) or 0
+
+	if buildingCount <= 2 then
+		return 1
+	elseif buildingCount <= 4 then
+		return 2
+	elseif buildingCount <= 10 then
+		return 3
+	else
+		return 4 + math.floor((buildingCount - 11) / 5)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- GetMultiplier(stage) -> number
+-- Berechnet den Kosten-Multiplikator für eine gegebene Stufe (exponentiell,
+-- kein Maximum).
+--------------------------------------------------------------------------------
+function BuildingConfig.GetMultiplier(stage)
+	stage = tonumber(stage) or 1
+
+	if stage <= 1 then
+		return 1.0
+	end
+
+	return 1 + math.pow(stage - 1, 1.5) * 0.6
+end
 
 --------------------------------------------------------------------------------
 -- Ordner-Name in ServerStorage

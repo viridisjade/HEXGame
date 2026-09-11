@@ -505,10 +505,11 @@ local function updateStats(city)
 		if costSuccess then buildingCosts = costs end
 	end
 
-	-- Stadtaufschlag-Hinweis aktualisieren
+	-- Stadtaufschlag-Hinweis aktualisieren (Stufen-System)
 	if markupLabel then
-		if buildingCosts and buildingCosts._info and buildingCosts._info.markupPercent > 0 then
-			markupLabel.Text = "Stadtaufschlag: +" .. buildingCosts._info.markupPercent .. "% (" .. buildingCosts._info.buildingCount .. " Gebäude)"
+		if buildingCosts and buildingCosts._info and buildingCosts._info.stage and buildingCosts._info.stage > 1 then
+			local multiplierText = string.format("%.1f", buildingCosts._info.multiplier or 1.0)
+			markupLabel.Text = "Stadtaufschlag: Stufe " .. buildingCosts._info.stage .. " (x" .. multiplierText .. ", " .. buildingCosts._info.buildingCount .. " Gebäude)"
 			markupLabel.Visible = true
 		else
 			markupLabel.Visible = false

@@ -51,7 +51,7 @@ end
 -- ausgewählten Stadt. Kommt aus BuildingCostSystem.GetAllBuildingCosts
 -- (Server) über das GetBuildingCosts-Remote.
 --
--- Struktur: { [buildingType] = { name, baseCost, actualCost, markupPercent }, _info = { markupPercent, buildingCount } }
+-- Struktur: { [buildingType] = { name, baseCost, actualCost, stage, multiplier }, _info = { stage, multiplier, buildingCount } }
 --------------------------------------------------------------------------------
 function CityDataCache.GetBuildingCosts()
 	return currentBuildingCosts

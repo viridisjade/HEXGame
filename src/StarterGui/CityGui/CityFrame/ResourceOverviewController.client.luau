@@ -145,11 +145,11 @@ local function updateOverview(city)
 			end
 
 			if preview then
-				local markupPercent = (buildingCosts._info and buildingCosts._info.markupPercent) or preview.info.markupPercent or 0
-				local buildingCount = (buildingCosts._info and buildingCosts._info.buildingCount) or 0
+				local stage = (buildingCosts._info and buildingCosts._info.stage) or preview.info.stage or 1
+				local multiplier = (buildingCosts._info and buildingCosts._info.multiplier) or preview.info.multiplier or 1.0
 				local text = preview.info.name .. ": " .. preview.info.actualCost .. " Industrie"
-				if markupPercent > 0 then
-					text = text .. " (+" .. markupPercent .. "% Aufschlag, " .. buildingCount .. " Gebäude)"
+				if stage > 1 then
+					text = text .. " (Stufe " .. stage .. ", x" .. string.format("%.1f", multiplier) .. ")"
 				end
 				labels.Work.detail.Text = "→ 0 Kein aktives Projekt (verfällt)\n" .. text
 			else
