@@ -1,8 +1,5 @@
 {
   "properties": {
-    "Sink": {
-      "Enum": 0
-    },
     "Position": {
       "UDim2": [
         [
@@ -26,6 +23,9 @@
           0
         ]
       ]
+    },
+    "Sink": {
+      "Enum": 0
     }
   },
   "className": "Frame"
