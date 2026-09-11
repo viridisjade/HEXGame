@@ -57,12 +57,17 @@ function CityEconomySystem.GetWorkerProduction(cityId)
 		return { food = 0, work = 0, gold = 0, research = 0 }
 	end
 
+	-- Balance: globaler Ertrags-Multiplikator (aktuell 0.5, siehe
+	-- BuildingConfig.YIELD_MULTIPLIER) wirkt NUR auf die Erträge selbst,
+	-- nicht auf Kosten irgendeiner Art.
+	local yieldMult = BuildingConfig.YIELD_MULTIPLIER or 1
+
 	local jobs = city.jobs
 	return {
-		food     = num(jobs.farmer)    * config.PRODUCTION_PER_FARMER,
-		work     = num(jobs.worker)    * config.PRODUCTION_PER_WORKER,
-		gold     = num(jobs.trader)    * config.PRODUCTION_PER_TRADER,
-		research = num(jobs.scientist) * config.PRODUCTION_PER_SCIENTIST,
+		food     = num(jobs.farmer)    * config.PRODUCTION_PER_FARMER    * yieldMult,
+		work     = num(jobs.worker)    * config.PRODUCTION_PER_WORKER    * yieldMult,
+		gold     = num(jobs.trader)    * config.PRODUCTION_PER_TRADER    * yieldMult,
+		research = num(jobs.scientist) * config.PRODUCTION_PER_SCIENTIST * yieldMult,
 	}
 end
 
@@ -73,6 +78,11 @@ function CityEconomySystem.GetHexAndBuildingProduction(cityId)
 	end
 
 	local result = { food = 0, work = 0, gold = 0, research = 0 }
+
+	-- Balance: globaler Ertrags-Multiplikator (aktuell 0.5, siehe
+	-- BuildingConfig.YIELD_MULTIPLIER) wirkt NUR auf die Erträge selbst,
+	-- nicht auf Kosten irgendeiner Art (Baukosten bleiben unverändert).
+	local yieldMult = BuildingConfig.YIELD_MULTIPLIER or 1
 
 	for _, building in ipairs(city.buildings or {}) do
 		local hex = HexData.GetHex(building.q, building.r)
@@ -95,10 +105,10 @@ function CityEconomySystem.GetHexAndBuildingProduction(cityId)
 					tGold = tech.GetYieldMultiplier(owner, "gold", bType)
 				end
 
-				result.food     = result.food     + num(soilStats.Nutrients) * num(mult.Nutrients) * tFood
-				result.work     = result.work     + num(soilStats.Industry)  * num(mult.Industry)  * tWork
-				result.gold     = result.gold     + num(soilStats.Gold)      * num(mult.Gold)      * tGold
-				result.research = result.research + num(soilStats.Research)  * num(mult.Research)
+				result.food     = result.food     + num(soilStats.Nutrients) * num(mult.Nutrients) * tFood * yieldMult
+				result.work     = result.work     + num(soilStats.Industry)  * num(mult.Industry)  * tWork * yieldMult
+				result.gold     = result.gold     + num(soilStats.Gold)      * num(mult.Gold)      * tGold * yieldMult
+				result.research = result.research + num(soilStats.Research)  * num(mult.Research)         * yieldMult
 			end
 		end
 	end
