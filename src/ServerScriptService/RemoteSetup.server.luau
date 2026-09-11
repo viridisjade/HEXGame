@@ -93,6 +93,7 @@ ensure(dataRemotes, "RemoteEvent", "RequestFoundCity")
 ensure(dataRemotes, "RemoteEvent", "RequestPlaceBuilding")
 ensure(dataRemotes, "RemoteEvent", "RequestRecruitUnit")
 ensure(dataRemotes, "RemoteEvent", "RequestMoveCitizen")
+ensure(dataRemotes, "RemoteEvent", "RequestInstantBuy")
 ensure(dataRemotes, "RemoteEvent", "RequestBuildCamp")
 ensure(dataRemotes, "RemoteEvent", "CityStatsChanged")
 

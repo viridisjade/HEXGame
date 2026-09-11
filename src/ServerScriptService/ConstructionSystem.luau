@@ -19,6 +19,7 @@ local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
 local SoilGenerator = require(script.Parent:WaitForChild("SoilGenerator"))
 local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
 local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 
 local UnitSpawner = require(script.Parent:WaitForChild("UnitSpawner"))
 local CombatData = require(script.Parent:WaitForChild("CombatData"))
@@ -323,6 +324,83 @@ function ConstructionSystem.StartUnitRecruitment(player, cityId, unitType, spawn
 	return true, order
 end
 
+--------------------------------------------------------------------------------
+-- completeOrder(cityId, city, order)
+-- Schliesst ein fertiges Bau-/Rekrutierungs-Item tatsaechlich ab (Model
+-- platzieren, CityData aktualisieren, Queue weiterschalten, Client
+-- benachrichtigen). Wird sowohl vom normalen Runden-Fortschritt
+-- (ProcessAllConstruction) als auch vom Sofort-Kauf (BuyInstantComplete)
+-- verwendet, damit beide exakt denselben Effekt haben.
+--------------------------------------------------------------------------------
+local function completeOrder(cityId, city, order)
+	if order.orderType == "Unit" then
+		local spawned, spawnState = ConstructionSystem.TrySpawnUnit(cityId, order)
+		if spawned then
+			print("[ConstructionSystem] Unit erfolgreich gespawnt: " .. order.unitType)
+			CityData.CompleteActiveBuildOrder(cityId)
+			-- Fog of War: neue Unit erweitert die Sicht des Besitzers.
+			pcall(FogOfWarSystem.UpdateVision, city.owner)
+		else
+			print("[ConstructionSystem] Unit " .. order.unitType .. " wartet auf Spawn: " .. tostring(spawnState))
+			order.status = "WaitingSpawn"
+			order.spawnWaitReason = spawnState
+		end
+	else
+		local folder = getWorkspaceBuildings()
+		local ghost = folder:FindFirstChild("Ghost_" .. order.buildingType .. "_" .. order.q .. "_" .. order.r)
+		if ghost then ghost:Destroy() end
+
+		local realModel = placeModel(order.buildingType, order.q, order.r, false)
+		if realModel then
+			local buildingId = BuildingData.CreateBuilding(order.buildingType, city.owner, order.q, order.r, city.provinceId)
+			CityData.AddBuilding(cityId, buildingId, order.buildingType, order.q, order.r)
+			HexData.UpdateHex(order.q, order.r, { building = order.buildingType })
+
+			local jobTypeMap = {
+				Farm = "farmer",
+				Factory = "worker",
+				Market = "trader",
+				Laboratory = "scientist",
+			}
+			local newJob = jobTypeMap[order.buildingType]
+			if newJob then
+				CityEconomySystem.AddJobSlot(cityId, newJob, 1)
+				-- Neuer Arbeitsplatz entstanden: arbeitslose Bürger sofort
+				-- zuweisen (Priorität Farmer > Worker > Trader > Scientist).
+				CityEconomySystem.AutoAssignWorkers(cityId)
+			end
+
+			local hex = HexData.GetHex(order.q, order.r)
+			if hex and hex.soil then
+				local soilStats = SoilGenerator.Stats[hex.soil]
+				if soilStats then
+					local buildingConfig = BuildingConfig.GetBuilding(order.buildingType)
+					local mult = (buildingConfig and buildingConfig.StatMultiplier) or { Nutrients=1, Industry=1, Gold=1, Research=1 }
+
+					local finalStats = {
+						Nutrients = (soilStats.Nutrients or 0) * (mult.Nutrients or 1),
+						Industry = (soilStats.Industry or 0) * (mult.Industry or 1),
+						Gold = (soilStats.Gold or 0) * (mult.Gold or 1),
+						Research = (soilStats.Research or 0) * (mult.Research or 1),
+					}
+
+					CityData.AddStats(cityId, finalStats)
+				end
+			end
+
+			CityData.CompleteActiveBuildOrder(cityId)
+			print("[ConstructionSystem] Gebäude fertiggestellt: " .. order.buildingType)
+
+			-- Fog of War: neues Gebäude (Camp/City/Bastion) ist Sichtquelle.
+			pcall(FogOfWarSystem.UpdateVision, city.owner)
+
+			if _G.NotifyCityStatsChanged then
+				_G.NotifyCityStatsChanged(cityId)
+			end
+		end
+	end
+end
+
 function ConstructionSystem.ProcessAllConstruction()
 	for cityId, city in pairs(CityData.GetAllCities()) do
 		local order = CityData.GetActiveBuildOrder(cityId)
@@ -350,75 +428,85 @@ function ConstructionSystem.ProcessAllConstruction()
 			end
 
 			if isFinished then
-				if order.orderType == "Unit" then
-					local spawned, spawnState = ConstructionSystem.TrySpawnUnit(cityId, order)
-					if spawned then
-						print("[ConstructionSystem] Unit erfolgreich gespawnt: " .. order.unitType)
-						CityData.CompleteActiveBuildOrder(cityId)
-						-- Fog of War: neue Unit erweitert die Sicht des Besitzers.
-						pcall(FogOfWarSystem.UpdateVision, city.owner)
-					else
-						print("[ConstructionSystem] Unit " .. order.unitType .. " wartet auf Spawn: " .. tostring(spawnState))
-						order.status = "WaitingSpawn"
-						order.spawnWaitReason = spawnState
-					end
-				else
-					local folder = getWorkspaceBuildings()
-					local ghost = folder:FindFirstChild("Ghost_" .. order.buildingType .. "_" .. order.q .. "_" .. order.r)
-					if ghost then ghost:Destroy() end
-
-					local realModel = placeModel(order.buildingType, order.q, order.r, false)
-					if realModel then
-						local buildingId = BuildingData.CreateBuilding(order.buildingType, city.owner, order.q, order.r, city.provinceId)
-						CityData.AddBuilding(cityId, buildingId, order.buildingType, order.q, order.r)
-						HexData.UpdateHex(order.q, order.r, { building = order.buildingType })
-
-						local jobTypeMap = {
-							Farm = "farmer",
-							Factory = "worker",
-							Market = "trader",
-							Laboratory = "scientist",
-						}
-						local newJob = jobTypeMap[order.buildingType]
-						if newJob then
-							CityEconomySystem.AddJobSlot(cityId, newJob, 1)
-							-- Neuer Arbeitsplatz entstanden: arbeitslose Bürger sofort
-							-- zuweisen (Priorität Farmer > Worker > Trader > Scientist).
-							CityEconomySystem.AutoAssignWorkers(cityId)
-						end
-
-						local hex = HexData.GetHex(order.q, order.r)
-						if hex and hex.soil then
-							local soilStats = SoilGenerator.Stats[hex.soil]
-							if soilStats then
-								local buildingConfig = BuildingConfig.GetBuilding(order.buildingType)
-								local mult = (buildingConfig and buildingConfig.StatMultiplier) or { Nutrients=1, Industry=1, Gold=1, Research=1 }
-
-								local finalStats = {
-									Nutrients = (soilStats.Nutrients or 0) * (mult.Nutrients or 1),
-									Industry = (soilStats.Industry or 0) * (mult.Industry or 1),
-									Gold = (soilStats.Gold or 0) * (mult.Gold or 1),
-									Research = (soilStats.Research or 0) * (mult.Research or 1),
-								}
-
-								CityData.AddStats(cityId, finalStats)
-							end
-						end
-
-						CityData.CompleteActiveBuildOrder(cityId)
-						print("[ConstructionSystem] Gebäude fertiggestellt: " .. order.buildingType)
-
-						-- Fog of War: neues Gebäude (Camp/City/Bastion) ist Sichtquelle.
-						pcall(FogOfWarSystem.UpdateVision, city.owner)
-
-						if _G.NotifyCityStatsChanged then
-							_G.NotifyCityStatsChanged(cityId)
-						end
-					end
-				end
+				completeOrder(cityId, city, order)
 			end
 		end
 	end
+end
+
+--------------------------------------------------------------------------------
+-- GetFirstInQueue(cityId) -> order or nil
+-- Das ERSTE Item der Bau-/Rekrutierungs-Queue (das gerade aktiv gebaut wird).
+--------------------------------------------------------------------------------
+function ConstructionSystem.GetFirstInQueue(cityId)
+	return CityData.GetActiveBuildOrder(cityId)
+end
+
+--------------------------------------------------------------------------------
+-- GetInstantBuyPrice(cityId) -> number, table or nil, nil
+-- Berechnet den Gold-Preis, um das ERSTE Queue-Item sofort fertigzustellen:
+--   basisPreis = industrieKosten * 1.5
+--   fortschritt = aktuelleIndustrie / industrieKosten (0..1)
+--   preis = math.ceil(basisPreis * (1 - fortschritt))
+-- Gibt (price, order) zurueck, oder (nil, nil) wenn keine Queue/Item existiert.
+--------------------------------------------------------------------------------
+function ConstructionSystem.GetInstantBuyPrice(cityId)
+	local order = ConstructionSystem.GetFirstInQueue(cityId)
+	if not order or order.status ~= "Building" then
+		return nil, nil
+	end
+
+	local industryCost = tonumber(order.industryCost) or 0
+	if industryCost <= 0 then
+		return nil, nil
+	end
+
+	local progressAmount = tonumber(order.industryProgress) or 0
+	local progress = math.clamp(progressAmount / industryCost, 0, 1)
+
+	local baseCost = industryCost * 1.5
+	local goldCost = math.ceil(baseCost * (1 - progress))
+
+	return goldCost, order
+end
+
+--------------------------------------------------------------------------------
+-- BuyInstantComplete(cityId, player) -> success, reason
+-- Kauft das ERSTE Item der Bau-/Rekrutierungs-Queue mit Gold sofort frei.
+-- Preis: siehe GetInstantBuyPrice. Zieht Gold vom Spieler ab, setzt den
+-- Baufortschritt auf 100% und schliesst das Item sofort ab (gleicher
+-- Effekt wie normales Fertigwerden durch Industrie).
+--------------------------------------------------------------------------------
+function ConstructionSystem.BuyInstantComplete(cityId, player)
+	local city = CityData.GetCity(cityId)
+	if not city then return false, "Stadt nicht gefunden" end
+	if city.owner ~= player then return false, "Stadt gehört dir nicht" end
+
+	local goldCost, order = ConstructionSystem.GetInstantBuyPrice(cityId)
+	if not order then return false, "Keine Warteschlange aktiv" end
+	if not goldCost or goldCost <= 0 then return false, "Bereits fertig" end
+
+	if not PlayerData.CanAfford(player, goldCost) then
+		return false, "Nicht genug Gold"
+	end
+
+	local spent = PlayerData.SpendGold(player, goldCost)
+	if not spent then
+		return false, "Nicht genug Gold"
+	end
+
+	order.industryProgress = order.industryCost
+
+	print("[ConstructionSystem] " .. player.Name .. " kauft " .. tostring(order.buildingType or order.unitType)
+		.. " sofort frei für " .. goldCost .. " Gold")
+
+	completeOrder(cityId, city, order)
+
+	if _G.NotifyCityStatsChanged then
+		_G.NotifyCityStatsChanged(cityId)
+	end
+
+	return true, nil
 end
 
 return ConstructionSystem

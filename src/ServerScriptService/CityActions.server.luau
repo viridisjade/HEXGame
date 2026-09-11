@@ -136,6 +136,22 @@ onEvent("RequestMoveCitizen", function(player, cityId, fromJob, toJob)
 end)
 
 --------------------------------------------------------------------------------
+-- RequestInstantBuy
+-- Kauft das erste Item der Bau-/Rekrutierungs-Queue mit Gold sofort frei.
+--------------------------------------------------------------------------------
+onEvent("RequestInstantBuy", function(player, cityId)
+	if not isId(cityId) then return end
+
+	local success, reason = ConstructionSystem.BuyInstantComplete(cityId, player)
+
+	if success then
+		print("[CityActions] " .. player.Name .. " hat Bau-Item in Stadt " .. tostring(cityId) .. " sofort freigekauft")
+	else
+		warn("[CityActions] Sofortkauf abgelehnt: " .. tostring(reason))
+	end
+end)
+
+--------------------------------------------------------------------------------
 -- RequestFoundCity
 -- Wandelt ein Camp in eine Stadt um
 --------------------------------------------------------------------------------

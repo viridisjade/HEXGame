@@ -48,6 +48,8 @@ local CityDataCache = require(ReplicatedStorage:WaitForChild("CityDataCache"))
 
 local DataRemotes = ReplicatedStorage:WaitForChild("DataRemotes")
 local getBuildingCostsRemote = DataRemotes:FindFirstChild("GetBuildingCosts")
+local getEmpireDataRemote = DataRemotes:FindFirstChild("GetEmpireData")
+local requestInstantBuyRemote = DataRemotes:FindFirstChild("RequestInstantBuy")
 
 -- Stadtaufschlag-Hinweis (wird in updateStats befüllt)
 local markupLabel = cityFrame:FindFirstChild("MarkupLabel")
@@ -257,9 +259,9 @@ local function clearGeneratedQueue()
 	end
 end
 
-local function buildQueueSignature(city)
+local function buildQueueSignature(city, currentGold)
 	local queue = city.buildQueue or {}
-	local parts = { "ind:" .. tostring(city.industryPerRound or 0) }
+	local parts = { "ind:" .. tostring(city.industryPerRound or 0), "gold:" .. tostring(currentGold or 0) }
 	for _, order in ipairs(queue) do
 		table.insert(parts, table.concat({
 			tostring(order.id),
@@ -276,11 +278,44 @@ local function buildQueueSignature(city)
 	return table.concat(parts, "|")
 end
 
-local function renderBuildQueue(city)
+--------------------------------------------------------------------------------
+-- Sofortkauf: Preis-Formel (Feature "Bauzeit aufkaufen mit Gold")
+--   basisPreis = industrieKosten * 1.5
+--   fortschritt = industryProgress / industryCost (0..1)
+--   preis = math.ceil(basisPreis * (1 - fortschritt))
+-- Muss exakt mit ConstructionSystem.GetInstantBuyPrice (Server) übereinstimmen.
+--------------------------------------------------------------------------------
+local function getInstantBuyPrice(order)
+	if not order or order.status ~= "Building" then return nil end
+
+	local industryCost = tonumber(order.industryCost) or 0
+	if industryCost <= 0 then return nil end
+
+	local progressAmount = tonumber(order.industryProgress) or 0
+	local progress = math.clamp(progressAmount / industryCost, 0, 1)
+
+	local baseCost = industryCost * 1.5
+	return math.ceil(baseCost * (1 - progress)), progress
+end
+
+-- UIStroke-Rahmen für wartende Items (Position 2+ in der Queue), damit sie
+-- optisch als eigene Einträge erkennbar sind. Das erste Item (aktiver Bau)
+-- bekommt KEINEN Rahmen, sondern den Sofortkauf-Button.
+local function addWaitingStroke(guiObject)
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "WaitingStroke"
+	stroke.Color = Color3.fromRGB(230, 230, 230)
+	stroke.Transparency = 0.5
+	stroke.Thickness = 1.5
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = guiObject
+end
+
+local function renderBuildQueue(city, currentGold)
 	if not buildQueueFrame then return end
 
 	local queue = city.buildQueue or {}
-	local signature = buildQueueSignature(city)
+	local signature = buildQueueSignature(city, currentGold)
 	if signature == lastQueueSignature then return end
 	lastQueueSignature = signature
 
@@ -323,10 +358,15 @@ local function renderBuildQueue(city)
 		activeInfo = buildingByType[activeOrder.buildingType] or {name = "Building", icon = ""}
 	end
 
+	-- Sofortkauf-Preis fuer das aktive Item (nil wenn nicht kaufbar, z.B.
+	-- WaitingSpawn-Status oder bereits fertig).
+	local instantBuyPrice, instantBuyProgress = getInstantBuyPrice(activeOrder)
+	local activeFrameHeight = instantBuyPrice and 104 or 70
+
 	local activeFrame = Instance.new("Frame")
 	activeFrame.Name = "ActiveEntry"
 	activeFrame:SetAttribute("GeneratedQueueEntry", true)
-	activeFrame.Size = UDim2.new(1, 0, 0, 70)
+	activeFrame.Size = UDim2.new(1, 0, 0, activeFrameHeight)
 	activeFrame.Position = UDim2.new(0, 0, 0, 0)
 	activeFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
 	activeFrame.BorderSizePixel = 0
@@ -340,7 +380,7 @@ local function renderBuildQueue(city)
 	activeIcon.Parent = activeFrame
 
 	local activeText = Instance.new("TextLabel")
-	activeText.Size = UDim2.new(1, -70, 1, 0)
+	activeText.Size = UDim2.new(1, -70, 0, 70)
 	activeText.Position = UDim2.new(0, 70, 0, 0)
 	activeText.BackgroundTransparency = 1
 	activeText.Font = Enum.Font.SourceSansBold
@@ -372,12 +412,54 @@ local function renderBuildQueue(city)
 	activeText.Text = activeInfo.name .. " – " .. statusText
 	activeText.Parent = activeFrame
 
+	-- Feature "Bauzeit aufkaufen mit Gold": Button unter dem aktiven Item.
+	-- Nur sichtbar, wenn das Item ueberhaupt aufkaufbar ist (Building-Status,
+	-- gueltige Industriekosten).
+	if instantBuyPrice then
+		local buyButton = Instance.new("TextButton")
+		buyButton.Name = "InstantBuyButton"
+		buyButton:SetAttribute("GeneratedQueueEntry", true)
+		buyButton.Size = UDim2.new(1, -20, 0, 28)
+		buyButton.Position = UDim2.new(0, 10, 0, 72)
+		buyButton.Font = Enum.Font.SourceSansBold
+		buyButton.TextSize = 15
+		buyButton.AutoButtonColor = true
+
+		local affordable = (currentGold or 0) >= instantBuyPrice
+		local nearlyDone = (instantBuyProgress or 0) >= 0.95
+
+		local labelPrefix = nearlyDone and "⚡ Fertigstellen (" or "⚡ Sofort kaufen ("
+		buyButton.Text = labelPrefix .. instantBuyPrice .. " Gold)"
+
+		if affordable then
+			buyButton.BackgroundColor3 = Color3.fromRGB(70, 150, 70)
+			buyButton.TextColor3 = Color3.new(1, 1, 1)
+			buyButton.Active = true
+		else
+			buyButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+			buyButton.TextColor3 = Color3.fromRGB(180, 180, 180)
+			buyButton.Active = false
+		end
+		buyButton.BorderSizePixel = 0
+		buyButton.Parent = activeFrame
+
+		if affordable then
+			buyButton.MouseButton1Click:Connect(function()
+				if requestInstantBuyRemote then
+					requestInstantBuyRemote:FireServer(city.id)
+				end
+			end)
+		end
+	end
+
 	if #queue > 1 then
 		local waitingArea = Instance.new("Frame")
 		waitingArea.Name = "WaitingArea"
 		waitingArea:SetAttribute("GeneratedQueueEntry", true)
 		waitingArea.Size = UDim2.new(1, 0, 0, 60)
-		waitingArea.Position = UDim2.new(0, 0, 0, 75)
+		-- 5px Abstand unter dem aktiven Item (dessen Hoehe variiert, je
+		-- nachdem ob der Sofortkauf-Button angezeigt wird).
+		waitingArea.Position = UDim2.new(0, 0, 0, activeFrameHeight + 5)
 		waitingArea.BackgroundTransparency = 1
 		waitingArea.Parent = buildQueueFrame
 
@@ -406,8 +488,14 @@ local function renderBuildQueue(city)
 			item.Name = "Waiting_" .. tostring(order.id)
 			item.Size = UDim2.fromOffset(itemWidth, 60)
 			item.Position = UDim2.new(0, (count * (itemWidth + padding)), 0, 0)
-			item.BackgroundTransparency = 1
+			item.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+			item.BackgroundTransparency = 0.5
 			item.Parent = waitingArea
+
+			-- Änderung B: wartende Items (Position 2+) bekommen einen
+			-- duennen hellen Rahmen, damit sie als eigene Eintraege
+			-- erkennbar sind. Das aktive Item (oben) hat KEINEN Rahmen.
+			addWaitingStroke(item)
 
 			local icon = Instance.new("ImageLabel")
 			icon.Size = UDim2.fromOffset(40, 40)
@@ -495,6 +583,18 @@ local function updateStats(city)
 	end
 
 	local industry = tonumber(city.currentIndustryProduction) or 0
+
+	-- Aktuelles Spieler-Gold laden (für den Sofortkauf-Button in der Queue:
+	-- Preis-Anzeige + Ausgrauen wenn nicht genug Gold vorhanden ist).
+	local currentGold = 0
+	if getEmpireDataRemote then
+		local goldSuccess, empireData = pcall(function()
+			return getEmpireDataRemote:InvokeServer()
+		end)
+		if goldSuccess and empireData then
+			currentGold = tonumber(empireData.gold) or 0
+		end
+	end
 
 	-- Dynamische Baukosten vom Server abfragen
 	local buildingCosts = nil
@@ -590,7 +690,7 @@ local function updateStats(city)
 		end
 	end
 
-	renderBuildQueue(city)
+	renderBuildQueue(city, currentGold)
 end
 
 --------------------------------------------------------------------------------
