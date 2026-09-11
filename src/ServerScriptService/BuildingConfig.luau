@@ -146,6 +146,17 @@ function BuildingConfig.GetMultiplier(stage)
 end
 
 --------------------------------------------------------------------------------
+-- YIELD_MULTIPLIER
+-- Globaler Balance-Multiplikator auf ALLE Erträge, die durch Gebäude
+-- (Hex-Bodenertrag x StatMultiplier) und durch Job-Arbeiter (Farmer,
+-- Worker, Trader, Scientist) erzeugt werden: Food, Industrie, Gold,
+-- Forschung. Wird NUR auf Erträge angewendet, NICHT auf Baukosten,
+-- Rekrutierungskosten, Tech-Kosten oder Gold aus Handel/Plünderung.
+-- Siehe CityEconomySystem.GetWorkerProduction / GetHexAndBuildingProduction.
+--------------------------------------------------------------------------------
+BuildingConfig.YIELD_MULTIPLIER = 0.5
+
+--------------------------------------------------------------------------------
 -- Ordner-Name in ServerStorage
 --------------------------------------------------------------------------------
 BuildingConfig.FOLDER_NAME = "Buildings"
