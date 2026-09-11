@@ -12,6 +12,9 @@
         ]
       ]
     },
+    "Sink": {
+      "Enum": 0
+    },
     "Size": {
       "UDim2": [
         [
@@ -23,9 +26,6 @@
           0
         ]
       ]
-    },
-    "Sink": {
-      "Enum": 0
     }
   },
   "className": "Frame"
