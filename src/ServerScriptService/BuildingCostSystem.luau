@@ -4,17 +4,22 @@
     
     Berechnet dynamische Baukosten basierend auf der Stadtgröße.
     Die Basiskosten bleiben fix in der BuildingConfig.
-    
-    Aufschlag-Tabelle:
-        0-4 Gebäude    → +0%
-        5-9 Gebäude    → +10%
-        10-14 Gebäude  → +20%
-        15-19 Gebäude  → +30%
-        20-24 Gebäude  → +40%
-        25-29 Gebäude  → +50%
-        30-34 Gebäude  → +60%
-        35-39 Gebäude  → +70%
-        40+ Gebäude    → +80% (Maximum)
+
+    SKALIERUNG (linear, pro Gebäude):
+        Mit jedem Gebäude, das die Stadt bereits besitzt, steigen die
+        Kosten für das NÄCHSTE Gebäude um COST_SCALE_PER_BUILDING (5%).
+
+        tatsächlicheKosten = basisKosten * (1 + COST_SCALE_PER_BUILDING * anzahlGebäude)
+
+        Beispiele (5% pro Gebäude):
+            0 Gebäude  -> x1.00
+            1 Gebäude  -> x1.05
+            2 Gebäude  -> x1.10
+            5 Gebäude  -> x1.25
+            10 Gebäude -> x1.50
+
+        Kein Maximal-Aufschlag - die Kosten steigen unbegrenzt weiter.
+        Ergebnis wird IMMER auf ganze Zahlen aufgerundet (math.ceil).
 --]]
 
 local BuildingCostSystem = {}
@@ -26,10 +31,6 @@ local BuildingConfig = require(script.Parent:WaitForChild("BuildingConfig"))
 -- KONFIGURATION
 --------------------------------------------------------------------------------
 BuildingCostSystem.Config = {
-	BUILDING_MARKUP_PER_TIER = 0.10,   -- 10% pro Stufe
-	BUILDING_TIER_SIZE = 5,            -- Alle 5 Gebäude eine Stufe
-	BUILDING_MAX_MARKUP = 0.80,        -- Maximum +80%
-
 	-- Diese Gebäude zählen NICHT mit:
 	EXCLUDED_BUILDING_TYPES = {
 		["City"] = true,     -- Stadtzentrum
@@ -56,34 +57,28 @@ function BuildingCostSystem.GetBuildingCount(cityId)
 end
 
 --------------------------------------------------------------------------------
--- GetMarkup(cityId) -> number (0.0 bis 0.8)
--- Berechnet den aktuellen Aufschlag
+-- GetMarkup(cityId) -> number (z.B. 0.05, 0.10, 0.25, ... theoretisch unbegrenzt)
+-- Berechnet den aktuellen Aufschlag: COST_SCALE_PER_BUILDING pro Gebäude,
+-- kein Maximum.
 --------------------------------------------------------------------------------
 function BuildingCostSystem.GetMarkup(cityId)
-	local config = BuildingCostSystem.Config
 	local buildingCount = BuildingCostSystem.GetBuildingCount(cityId)
-
-	local tier = math.floor(buildingCount / config.BUILDING_TIER_SIZE)
-	local markup = tier * config.BUILDING_MARKUP_PER_TIER
-
-	-- Auf Maximum begrenzen
-	markup = math.min(markup, config.BUILDING_MAX_MARKUP)
-
-	return markup
+	return BuildingConfig.COST_SCALE_PER_BUILDING * buildingCount
 end
 
 --------------------------------------------------------------------------------
--- GetMarkupPercent(cityId) -> number (0, 10, 20, ... 80)
+-- GetMarkupPercent(cityId) -> number (0, 5, 10, 15, ...)
 -- Gibt den Aufschlag als ganze Prozentzahl
 --------------------------------------------------------------------------------
 function BuildingCostSystem.GetMarkupPercent(cityId)
 	local markup = BuildingCostSystem.GetMarkup(cityId)
-	return math.floor(markup * 100)
+	return math.floor(markup * 100 + 0.5)
 end
 
 --------------------------------------------------------------------------------
 -- GetBuildingCost(cityId, buildingType) -> number
--- Berechnet die TATSÄCHLICHEN Kosten (Base × Markup)
+-- Berechnet die TATSÄCHLICHEN Industrie-Kosten:
+--   baseCost * (1 + COST_SCALE_PER_BUILDING * anzahlGebäude), aufgerundet.
 --------------------------------------------------------------------------------
 function BuildingCostSystem.GetBuildingCost(cityId, buildingType)
 	local config = BuildingConfig.GetBuilding(buildingType)
@@ -96,6 +91,9 @@ function BuildingCostSystem.GetBuildingCost(cityId, buildingType)
 
 	return actualCost
 end
+
+-- Alias (gleiche Berechnung, kürzerer Name für externe Aufrufer).
+BuildingCostSystem.GetCost = BuildingCostSystem.GetBuildingCost
 
 --------------------------------------------------------------------------------
 -- GetCostBreakdown(cityId, buildingType) -> table
@@ -110,7 +108,7 @@ function BuildingCostSystem.GetCostBreakdown(cityId, buildingType)
 	local baseCost = tonumber(config.IndustryCost) or 0
 	local markup = BuildingCostSystem.GetMarkup(cityId)
 	local actualCost = math.ceil(baseCost * (1 + markup))
-	local markupPercent = math.floor(markup * 100)
+	local markupPercent = BuildingCostSystem.GetMarkupPercent(cityId)
 	local buildingCount = BuildingCostSystem.GetBuildingCount(cityId)
 
 	return {
@@ -130,7 +128,7 @@ function BuildingCostSystem.GetAllBuildingCosts(cityId)
 	local result = {}
 	local allBuildings = BuildingConfig.GetAllBuildings()
 	local markup = BuildingCostSystem.GetMarkup(cityId)
-	local markupPercent = math.floor(markup * 100)
+	local markupPercent = BuildingCostSystem.GetMarkupPercent(cityId)
 	local buildingCount = BuildingCostSystem.GetBuildingCount(cityId)
 
 	for buildingType, config in pairs(allBuildings) do

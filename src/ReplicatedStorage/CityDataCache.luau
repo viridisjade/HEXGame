@@ -34,6 +34,7 @@ local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local CityDataCache = {}
 
 local currentCity = nil
+local currentBuildingCosts = nil
 local updatedEvent = Instance.new("BindableEvent")
 CityDataCache.OnUpdated = updatedEvent.Event
 
@@ -45,8 +46,21 @@ function CityDataCache.Get()
 end
 
 --------------------------------------------------------------------------------
+-- GetBuildingCosts() -> table or nil
+-- Die zuletzt geladenen (SKALIERTEN, nicht Basis-) Baukosten der aktuell
+-- ausgewählten Stadt. Kommt aus BuildingCostSystem.GetAllBuildingCosts
+-- (Server) über das GetBuildingCosts-Remote.
+--
+-- Struktur: { [buildingType] = { name, baseCost, actualCost, markupPercent }, _info = { markupPercent, buildingCount } }
+--------------------------------------------------------------------------------
+function CityDataCache.GetBuildingCosts()
+	return currentBuildingCosts
+end
+
+--------------------------------------------------------------------------------
 -- Refresh() -> city or nil
--- Lädt die Daten der aktuell ausgewählten Stadt neu.
+-- Lädt die Daten der aktuell ausgewählten Stadt (inkl. skalierter
+-- Baukosten) neu.
 --------------------------------------------------------------------------------
 function CityDataCache.Refresh()
 	local cityId = State.GetId(State.Kind.CITY)
@@ -54,6 +68,7 @@ function CityDataCache.Refresh()
 	if not cityId then
 		if currentCity ~= nil then
 			currentCity = nil
+			currentBuildingCosts = nil
 			updatedEvent:Fire(nil)
 		end
 		return nil
@@ -63,6 +78,10 @@ function CityDataCache.Refresh()
 	if not ok or not city then
 		return nil
 	end
+
+	-- Skalierte Baukosten mitladen (steigen mit der Anzahl Gebäude der Stadt).
+	local costsOk, costs = Net.Invoke("GetBuildingCosts", cityId)
+	currentBuildingCosts = (costsOk and costs) or nil
 
 	currentCity = city
 	updatedEvent:Fire(city)

@@ -10,6 +10,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CityDataCache = require(ReplicatedStorage:WaitForChild("CityDataCache"))
 
+-- Feste Anzeige-Reihenfolge fuer die "naechstes Gebaeude"-Vorschau (Arbeit-Block).
+local BUILDING_PREVIEW_ORDER = { "Farm", "Factory", "Market", "Laboratory", "Bastion" }
+
 local cityFrame = script.Parent
 
 local overviewFrame = cityFrame:FindFirstChild("ResourceOverviewFrame")
@@ -126,7 +129,32 @@ local function updateOverview(city)
 			labels.Work.detail.Text = "→ " .. workProd .. " " .. name .. " (" .. (activeProject.industryProgress or 0) .. "/" .. (activeProject.industryCost or 0) .. ")"
 			labels.Work.detail.TextColor3 = COLORS.project
 		else
-			labels.Work.detail.Text = "→ 0 Kein aktives Projekt (verfällt)"
+			-- Kein aktives Projekt: zeige die SKALIERTEN (nicht Basis-)
+			-- Kosten des naechsten Gebaeudes, das die Stadt bauen koennte,
+			-- damit der Spieler sieht was ihn der Aufschlag tatsaechlich kostet.
+			local buildingCosts = CityDataCache.GetBuildingCosts()
+			local preview = nil
+			if buildingCosts then
+				for _, buildingType in ipairs(BUILDING_PREVIEW_ORDER) do
+					local entry = buildingCosts[buildingType]
+					if entry then
+						preview = { type = buildingType, info = entry }
+						break
+					end
+				end
+			end
+
+			if preview then
+				local markupPercent = (buildingCosts._info and buildingCosts._info.markupPercent) or preview.info.markupPercent or 0
+				local buildingCount = (buildingCosts._info and buildingCosts._info.buildingCount) or 0
+				local text = preview.info.name .. ": " .. preview.info.actualCost .. " Industrie"
+				if markupPercent > 0 then
+					text = text .. " (+" .. markupPercent .. "% Aufschlag, " .. buildingCount .. " Gebäude)"
+				end
+				labels.Work.detail.Text = "→ 0 Kein aktives Projekt (verfällt)\n" .. text
+			else
+				labels.Work.detail.Text = "→ 0 Kein aktives Projekt (verfällt)"
+			end
 			labels.Work.detail.TextColor3 = COLORS.wasted
 		end
 	end

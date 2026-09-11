@@ -45,7 +45,7 @@ BuildingConfig.Buildings = {
 		Cost = 15,
 		CostType = "Gold",
 		ClaimsProvince = false,
-		IndustryCost = 100,
+		IndustryCost = 15,
 		StatMultiplier = { Nutrients = 3, Industry = 1, Gold = 1, Research = 1 },
 		Description = "Zieht 3x so viel Nahrung aus dem Boden.",
 	},
@@ -56,7 +56,7 @@ BuildingConfig.Buildings = {
 		Cost = 30,
 		CostType = "Gold",
 		ClaimsProvince = false,
-		IndustryCost = 150,
+		IndustryCost = 15,
 		StatMultiplier = { Nutrients = 1, Industry = 3, Gold = 1, Research = 1 },
 		Description = "Zieht 3x so viel Industrie aus dem Boden.",
 	},
@@ -67,7 +67,7 @@ BuildingConfig.Buildings = {
 		Cost = 25,
 		CostType = "Gold",
 		ClaimsProvince = false,
-		IndustryCost = 120,
+		IndustryCost = 20,
 		StatMultiplier = { Nutrients = 1, Industry = 1, Gold = 3, Research = 1 },
 		Description = "Zieht 3x so viel Gold aus dem Boden.",
 	},
@@ -78,7 +78,7 @@ BuildingConfig.Buildings = {
 		Cost = 40,
 		CostType = "Gold",
 		ClaimsProvince = false,
-		IndustryCost = 200,
+		IndustryCost = 20,
 		StatMultiplier = { Nutrients = 1, Industry = 1, Gold = 1, Research = 3 },
 		Description = "Zieht 3x so viel Forschung aus dem Boden.",
 	},
@@ -89,11 +89,20 @@ BuildingConfig.Buildings = {
 		Cost = 50,
 		CostType = "Gold",
 		ClaimsProvince = false,
-		IndustryCost = 300,
+		IndustryCost = 30,
 		StatMultiplier = { Nutrients = 1, Industry = 1, Gold = 1, Research = 1 },
 		Description = "Verteidigungsanlage. Bringt Basis-Ertrag.",
 	},
 }
+
+--------------------------------------------------------------------------------
+-- COST_SCALE_PER_BUILDING
+-- Mit jedem Gebäude, das eine Stadt bereits besitzt, steigen die
+-- Industrie-Kosten für das NÄCHSTE Gebäude um diesen Faktor (5%).
+-- tatsächlicheKosten = basisKosten * (1 + COST_SCALE_PER_BUILDING * anzahlGebäude)
+-- Siehe BuildingCostSystem.GetBuildingCost für die tatsächliche Berechnung.
+--------------------------------------------------------------------------------
+BuildingConfig.COST_SCALE_PER_BUILDING = 0.05
 
 --------------------------------------------------------------------------------
 -- Ordner-Name in ServerStorage

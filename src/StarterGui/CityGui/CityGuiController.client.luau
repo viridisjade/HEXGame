@@ -7,12 +7,16 @@
     startet Platzierungen, zeigt die BuildQueue.
 --]]
 
+-- HINWEIS: industryCost hier ist nur der BASIS-Fallback-Wert, falls die
+-- dynamischen (skalierten) Kosten nicht vom Server geladen werden konnten
+-- (siehe getBuildingCostsRemote weiter unten). Der tatsächlich angezeigte
+-- Preis kommt aus buildingCosts[type].actualCost (BuildingCostSystem).
 local CITY_BUILDINGS = {
-	{ type = "Farm",       name = "Farm",       icon = "rbxassetid://FARM_ASSET_ID",    industryCost = 100 },
-	{ type = "Factory",    name = "Factory",    icon = "rbxassetid://FACTORY_ASSET_ID", industryCost = 150 },
-	{ type = "Market",     name = "Market",     icon = "rbxassetid://MARKET_ASSET_ID",  industryCost = 120 },
-	{ type = "Laboratory", name = "Laboratory", icon = "rbxassetid://LAB_ASSET_ID",     industryCost = 200 },
-	{ type = "Bastion",    name = "Bastion",    icon = "rbxassetid://BASTION_ASSET_ID", industryCost = 300 },
+	{ type = "Farm",       name = "Farm",       icon = "rbxassetid://FARM_ASSET_ID",    industryCost = 15 },
+	{ type = "Factory",    name = "Factory",    icon = "rbxassetid://FACTORY_ASSET_ID", industryCost = 15 },
+	{ type = "Market",     name = "Market",     icon = "rbxassetid://MARKET_ASSET_ID",  industryCost = 20 },
+	{ type = "Laboratory", name = "Laboratory", icon = "rbxassetid://LAB_ASSET_ID",     industryCost = 20 },
+	{ type = "Bastion",    name = "Bastion",    icon = "rbxassetid://BASTION_ASSET_ID", industryCost = 30 },
 }
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
