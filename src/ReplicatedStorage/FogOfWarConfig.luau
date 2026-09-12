@@ -8,7 +8,8 @@
 
     SICHT-ZUSTAENDE PRO HEX & SPIELER
         unexplored  - nicht erkundet: alles unsichtbar
-        explored    - erkundet: Terrain/Gebaeude 50% transparent, KEINE Units
+        explored    - erkundet: Terrain/Soil/Province 50% transparent,
+                      Gebaeude und Units UNSICHTBAR (Transparency = 1)
         visible     - aktuell sichtbar: alles voll, Units sichtbar
 
     SICHTQUELLEN (Reichweite in Hexfeldern):

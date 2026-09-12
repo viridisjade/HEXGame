@@ -70,6 +70,8 @@ end
 -- Laeuft die Hex-Linie von der Quelle zum Ziel ab. Sobald ein Hex auf dem
 -- Weg (ausser der Quelle selbst) 2+ Ebenen hoeher ist als die Quelle,
 -- blockiert es die Sicht - das Ziel UND alles dahinter ist unsichtbar.
+-- Gibt zusaetzlich die Koordinate des ERSTEN blockierenden Hexes zurueck
+-- (falls vorhanden), damit der Aufrufer es als "erkundet" markieren kann.
 --------------------------------------------------------------------------------
 local function isVisibleAlongLine(sourceQ, sourceR, sourceHeight, targetQ, targetR)
 	local line = HexUtils.getLine(sourceQ, sourceR, targetQ, targetR)
@@ -78,18 +80,22 @@ local function isVisibleAlongLine(sourceQ, sourceR, sourceHeight, targetQ, targe
 		if not (hex.q == sourceQ and hex.r == sourceR) then
 			local hexHeight = getTerrainHeightAt(hex.q, hex.r)
 			if hexHeight >= sourceHeight + 2 then
-				return false -- ABBRUCH: dieses Hex blockiert die Sicht
+				-- ABBRUCH: dieses Hex blockiert die Sicht. Es selbst wird
+				-- vom Aufrufer als "erkundet" markiert (Terrain/Soil
+				-- sichtbar, keine Units/Gebaeude); alles dahinter bleibt
+				-- im Nebel.
+				return false, hex.q, hex.r
 			end
 		end
 	end
 
-	return true
+	return true, nil, nil
 end
 
 --------------------------------------------------------------------------------
 -- SICHTBEREICH (Radius-Suche ueber das Hex-Grid + Sichtlinien-Blockade)
 --------------------------------------------------------------------------------
-local function collectVisibleHexes(q, r, sight, outSet)
+local function collectVisibleHexes(q, r, sight, outSet, blockedSet)
 	if not outSet then return end
 	if sight < 0 then return end
 
@@ -113,8 +119,17 @@ local function collectVisibleHexes(q, r, sight, outSet)
 				if cur.q == q and cur.r == r then
 					-- Die Quelle selbst sieht immer sich selbst.
 					outSet[key] = true
-				elseif isVisibleAlongLine(q, r, sourceHeight, cur.q, cur.r) then
-					outSet[key] = true
+				else
+					local visible, blockerQ, blockerR = isVisibleAlongLine(q, r, sourceHeight, cur.q, cur.r)
+					if visible then
+						outSet[key] = true
+					elseif blockedSet and blockerQ and HexData.HasHex(blockerQ, blockerR) then
+						-- Nur das ERSTE Hindernis auf der Sichtlinie wird
+						-- als erkundet markiert - alles dahinter bleibt
+						-- im Nebel (isVisibleAlongLine bricht bereits beim
+						-- ersten Hindernis ab, liefert also genau das).
+						blockedSet[HexUtils.coordToKey(blockerQ, blockerR)] = true
+					end
 				end
 			end
 		end
@@ -137,7 +152,7 @@ end
 --------------------------------------------------------------------------------
 -- SICHTQUELLEN EINES SPIELERS
 --------------------------------------------------------------------------------
-local function addArmySight(player, outSet)
+local function addArmySight(player, outSet, blockedSet)
 	for _, army in ipairs(ArmyData.GetArmiesByOwner(player)) do
 		local maxSight = 0
 		for _, unitId in ipairs(army.units or {}) do
@@ -149,38 +164,43 @@ local function addArmySight(player, outSet)
 			end
 		end
 		if maxSight > 0 then
-			collectVisibleHexes(army.q, army.r, maxSight, outSet)
+			collectVisibleHexes(army.q, army.r, maxSight, outSet, blockedSet)
 		end
 	end
 end
 
-local function addCampSight(player, outSet)
+local function addCampSight(player, outSet, blockedSet)
 	for _, camp in ipairs(CampData.GetCampsByOwner(player)) do
-		collectVisibleHexes(camp.q, camp.r, FogOfWarConfig.CAMP_SIGHT, outSet)
+		collectVisibleHexes(camp.q, camp.r, FogOfWarConfig.CAMP_SIGHT, outSet, blockedSet)
 	end
 end
 
-local function addCitySight(player, outSet)
+local function addCitySight(player, outSet, blockedSet)
 	for _, city in ipairs(CityData.GetCitiesByOwner(player)) do
-		collectVisibleHexes(city.q, city.r, FogOfWarConfig.CITY_SIGHT, outSet)
+		collectVisibleHexes(city.q, city.r, FogOfWarConfig.CITY_SIGHT, outSet, blockedSet)
 	end
 end
 
-local function addBastionSight(player, outSet)
+local function addBastionSight(player, outSet, blockedSet)
 	for _, building in ipairs(BuildingData.GetBuildingsByType("Bastion")) do
 		if building.owner == player then
-			collectVisibleHexes(building.q, building.r, FogOfWarConfig.BASTION_SIGHT, outSet)
+			collectVisibleHexes(building.q, building.r, FogOfWarConfig.BASTION_SIGHT, outSet, blockedSet)
 		end
 	end
 end
 
+-- computeVisible(player) -> visible, blockedExplored
+-- blockedExplored: Hexes, die eine Sichtlinie blockiert haben (2+ Ebenen
+-- hoeher als die jeweilige Quelle) - werden NIE visible, aber als
+-- "erkundet" markiert (Terrain/Soil aufgedeckt, keine Units/Gebaeude).
 local function computeVisible(player)
 	local visible = {}
-	addArmySight(player, visible)
-	addCampSight(player, visible)
-	addCitySight(player, visible)
-	addBastionSight(player, visible)
-	return visible
+	local blockedExplored = {}
+	addArmySight(player, visible, blockedExplored)
+	addCampSight(player, visible, blockedExplored)
+	addCitySight(player, visible, blockedExplored)
+	addBastionSight(player, visible, blockedExplored)
+	return visible, blockedExplored
 end
 
 local function countSet(s)
@@ -206,8 +226,10 @@ function FogOfWarSystem.UpdateVision(player)
 		local state = FogOfWarData.GetOrCreate(player)
 		if not state then return end
 
-		-- 1) Neue sichtbare Menge berechnen.
-		local newVisible = computeVisible(player)
+		-- 1) Neue sichtbare Menge berechnen. blockedExplored sind Hexes,
+		--    die eine Sichtlinie blockiert haben (2+ Ebenen hoeher) - sie
+		--    werden NIE visible, aber unten als "erkundet" markiert.
+		local newVisible, blockedExplored = computeVisible(player)
 
 		local oldVisible = state.visible or {}
 
@@ -221,15 +243,21 @@ function FogOfWarSystem.UpdateVision(player)
 			if not newVisible[key] then newlyHidden[key] = true end
 		end
 
-		-- 3) Explored = explored UNION visible (permanent, nie entfernen).
-		local newlyExplored = FogOfWarData.AddExplored(player, newVisible)
+		-- 3) Explored = explored UNION visible UNION blockedExplored
+		--    (permanent, nie entfernen). Blockierende Hexes werden als
+		--    erkundet markiert, auch wenn sie NICHT visible werden -
+		--    Terrain/Soil aufdecken, aber keine Units/Gebaeude.
+		local exploredCandidates = {}
+		for key in pairs(newVisible) do exploredCandidates[key] = true end
+		for key in pairs(blockedExplored) do exploredCandidates[key] = true end
+		local newlyExplored = FogOfWarData.AddExplored(player, exploredCandidates)
 
 		-- 4) Neuen Zustand speichern.
 		state.visible = newVisible
 
-		print(("[FogOfWar] UpdateVision %s | sichtbar=%d neu=%d hidden=%d erkundet=%d")
+		print(("[FogOfWar] UpdateVision %s | sichtbar=%d neu=%d hidden=%d erkundet=%d blockiert=%d")
 			:format(player.Name, countSet(newVisible), countSet(newlyVisible),
-				countSet(newlyHidden), countSet(newlyExplored)))
+				countSet(newlyHidden), countSet(newlyExplored), countSet(blockedExplored)))
 
 		-- 5) Delta an den Client senden.
 		FogOfWarSystem.SendVisionDelta(player, newlyVisible, newlyHidden, newlyExplored)
@@ -239,6 +267,7 @@ function FogOfWarSystem.UpdateVision(player)
 		warn("[FogOfWar] UpdateVision FEHLER (" .. tostring(player.Name) .. "): " .. tostring(err))
 	end
 end
+
 
 --------------------------------------------------------------------------------
 -- DELTA SENDEN

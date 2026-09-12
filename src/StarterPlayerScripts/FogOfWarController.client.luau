@@ -10,7 +10,7 @@
 
     ZUSTAENDE (siehe FogOfWarConfig.STATE):
         unexplored  -> echtes Hex unsichtbar, stattdessen FOG-Model-Platzhalter
-        explored    -> Terrain/Soil/Gebaeude/Province = 0.5, KEINE Units
+        explored    -> Terrain/Soil/Province = 0.5, Gebaeude/Units = 1 (unsichtbar)
         visible     -> Terrain/Soil/Gebaeude = 0, Province = 0.5, Units = 0
 
     FOG-MODELS:
@@ -262,14 +262,20 @@ local function setHexState(key, state)
 	local q, r = keyToCoord(key)
 	if not q then return end
 
+	-- t = Terrain/Soil-Transparenz. buildingT = Gebaeude-Transparenz
+	-- (im erkundeten Zustand IMMER unsichtbar, unabhaengig von t -
+	-- Sichtlinien-Blockaden decken nur Terrain/Soil auf, keine Gebaeude).
 	local t = 1            -- unexplored: alles unsichtbar
+	local buildingT = 1
 	local provinceT = 1
 	if state == FogOfWarConfig.STATE.VISIBLE then
 		t = 0              -- sichtbar: voll
+		buildingT = 0
 		provinceT = 0.5    -- ProvinceHex bleibt halb transparent
 		RemoveFogModel(q, r)   -- FOG-Platzhalter entfernen, echtes Hex sichtbar
 	elseif state == FogOfWarConfig.STATE.EXPLORED then
-		t = 0.5            -- erkundet: Geister-Look
+		t = 0.5            -- erkundet: Terrain/Soil im Geister-Look sichtbar
+		buildingT = 1      -- Gebaeude bleiben im erkundeten Zustand unsichtbar
 		provinceT = 0.5
 		RemoveFogModel(q, r)   -- FOG entfernen, echtes Hex 50% sichtbar
 	else
@@ -280,7 +286,7 @@ local function setHexState(key, state)
 
 	applyTransparency(findTerrainModel(q, r), t)
 	applyTransparency(findSoilModel(q, r), t)
-	applyTransparency(findBuilding(q, r), t)
+	applyTransparency(findBuilding(q, r), buildingT)
 	applyTransparency(findProvinceModel(q, r), provinceT)
 end
 
