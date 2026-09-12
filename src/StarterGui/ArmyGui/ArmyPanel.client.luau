@@ -6,15 +6,19 @@
     DiplomacyGui, VictoryGui, TechTreeGui): alle Elemente werden per
     Instance.new() erzeugt, nichts wird mehr manuell in Studio gebaut.
 
-    LAYOUT:
+    LAYOUT: schmale, NICHT-SPERRENDE Info-Tafel am rechten Bildschirmrand
+    (kein zentriertes Vollbild-Menu, kein abdunkelndes Overlay - der Spieler
+    kann weiterhin auf die Karte klicken, waehrend die GUI offen ist):
       Header      - Armee-Name + Close-Button
-      StatsBar    - Gesamt-HP/Attack/Defense/Sight/Movement + HP-Balken
-      UnitSlots   - dynamisches Grid (5 pro Reihe), Anzahl = maxUnits
-                    (Basis 8 + Logistics-Tech-Bonus, siehe ArmySystem.GetMaxUnits)
-      UnitDetails (links unten) - Stats der ausgewaehlten Unit + HoverUnitImage
-      Actions     (rechts unten) - Camp bauen / Auswahl aufheben / Kampf ansehen
+      StatsBar    - Gesamt-HP/Attack/Defense/Sight/Movement (Grid) + HP-Balken
+      UnitSlots   - dynamisches Grid (3 pro Reihe, schmale Spalte),
+                    Anzahl = maxUnits (Basis 8 + Logistics-Tech-Bonus,
+                    siehe ArmySystem.GetMaxUnits)
+      UnitDetails (oben im unteren Bereich) - Stats der ausgewaehlten Unit
+      Actions     (darunter gestapelt) - Camp bauen / Auswahl aufheben /
+                    Kampf ansehen / HoverUnitImage-Vorschau
 
-    FUNKTIONALITAET (unveraendert zur Vorversion, nur neues Design):
+    FUNKTIONALITAET (unveraendert zur Vorversion, nur neues Design/Layout):
       - Dynamische Unit-Slots, Anzahl passt sich an maxUnits an
         (UIGridLayout wird bei Aenderung neu gebaut, z.B. Logistics-Tech)
       - Klick auf belegten Slot -> Unit auswaehlen -> Details anzeigen
@@ -105,9 +109,9 @@ local FONT_DESC  = Enum.Font.Gotham
 -- SLOT-KONFIGURATION (zentral, anpassbar)
 --------------------------------------------------------------------------------
 local SLOT_CONFIG = {
-	SLOTS_PER_ROW  = 5,
-	SLOT_SIZE      = UDim2.new(0, 70, 0, 80),
-	SLOT_PADDING   = UDim2.new(0, 8, 0, 8),
+	SLOTS_PER_ROW  = 3, -- schmales 280px-Fenster: 3 statt 5 Slots pro Reihe
+	SLOT_SIZE      = UDim2.new(0, 74, 0, 78),
+	SLOT_PADDING   = UDim2.new(0, 6, 0, 6),
 	MAX_UNITS      = 99, -- harte Obergrenze gegen Spam
 }
 
@@ -183,25 +187,30 @@ local ACTION_COLORS = {
 
 --------------------------------------------------------------------------------
 -- ARMY-FENSTER
+--
+-- Schmale, nicht-sperrende Info-Tafel am rechten Bildschirmrand (kein
+-- zentriertes Vollbild-Menu, kein abdunkelndes Overlay). Das Spiel laeuft
+-- normal weiter, waehrend die GUI offen ist - der Spieler kann weiterhin
+-- auf die Karte klicken.
 --------------------------------------------------------------------------------
 local armyWindow = Instance.new("Frame")
 armyWindow.Name = "ArmyWindow"
-armyWindow.Size = UDim2.new(0.5, 0, 0.7, 0)
-armyWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
-armyWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+armyWindow.Size = UDim2.new(0, 280, 0.55, 0)
+armyWindow.Position = UDim2.new(1, -290, 0.5, 0)
+armyWindow.AnchorPoint = Vector2.new(0, 0.5)
 armyWindow.BackgroundColor3 = COLORS.windowBg
-armyWindow.BackgroundTransparency = 0.05
+armyWindow.BackgroundTransparency = 0.15
 armyWindow.BorderSizePixel = 0
 armyWindow.Parent = gui
 makeCorner(armyWindow, 12)
 makeStroke(armyWindow, 3, COLORS.panelBorder)
 
 --------------------------------------------------------------------------------
--- HEADER
+-- HEADER (kompakt, fuer die schmale Breite)
 --------------------------------------------------------------------------------
 local header = Instance.new("Frame")
 header.Name = "Header"
-header.Size = UDim2.new(1, 0, 0, 48)
+header.Size = UDim2.new(1, 0, 0, 36)
 header.Position = UDim2.new(0, 0, 0, 0)
 header.BackgroundColor3 = COLORS.headerBg
 header.BorderSizePixel = 0
@@ -220,11 +229,11 @@ headerCornerFix.Parent = header
 
 local nameLabel = Instance.new("TextLabel")
 nameLabel.Name = "ArmyNameLabel"
-nameLabel.Size = UDim2.new(1, -60, 1, 0)
-nameLabel.Position = UDim2.new(0, 16, 0, 0)
+nameLabel.Size = UDim2.new(1, -40, 1, 0)
+nameLabel.Position = UDim2.new(0, 10, 0, 0)
 nameLabel.BackgroundTransparency = 1
 nameLabel.Font = FONT_TITLE
-nameLabel.TextSize = 22
+nameLabel.TextSize = 15
 nameLabel.TextColor3 = COLORS.headerText
 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -233,11 +242,11 @@ nameLabel.Parent = header
 
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
-closeButton.Size = UDim2.fromOffset(32, 32)
-closeButton.Position = UDim2.new(1, -42, 0.5, -16)
+closeButton.Size = UDim2.fromOffset(24, 24)
+closeButton.Position = UDim2.new(1, -30, 0.5, -12)
 closeButton.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
 closeButton.Font = FONT_VALUE
-closeButton.TextSize = 16
+closeButton.TextSize = 13
 closeButton.TextColor3 = Color3.new(1, 1, 1)
 closeButton.Text = "✕"
 closeButton.BorderSizePixel = 0
@@ -249,74 +258,80 @@ closeButton.Activated:Connect(function()
 end)
 
 --------------------------------------------------------------------------------
--- KAMPF-LOCK: Label + "Kampf ansehen"-Button (im Header eingeblendet)
+-- KAMPF-LOCK: Label (als erste Zeile im Body, ueber der ganzen Breite)
 --------------------------------------------------------------------------------
 local combatLabel = Instance.new("TextLabel")
 combatLabel.Name = "InCombatLabel"
-combatLabel.Size = UDim2.new(0, 140, 0, 20)
-combatLabel.Position = UDim2.new(1, -200, 0, 6)
+combatLabel.LayoutOrder = 0
+combatLabel.Size = UDim2.new(1, 0, 0, 18)
 combatLabel.BackgroundTransparency = 1
 combatLabel.Font = FONT_VALUE
-combatLabel.TextSize = 13
+combatLabel.TextSize = 12
 combatLabel.TextColor3 = Color3.fromRGB(255, 120, 90)
-combatLabel.TextXAlignment = Enum.TextXAlignment.Right
+combatLabel.TextXAlignment = Enum.TextXAlignment.Center
 combatLabel.Text = "⚔️ IM KAMPF"
 combatLabel.Visible = false
-combatLabel.Parent = header
 
 --------------------------------------------------------------------------------
--- BODY-CONTAINER
+-- BODY-CONTAINER (scrollbar, da das Fenster jetzt schmal + niedrig ist)
 --------------------------------------------------------------------------------
-local body = Instance.new("Frame")
+local body = Instance.new("ScrollingFrame")
 body.Name = "Body"
-body.Size = UDim2.new(1, -20, 1, -58)
-body.Position = UDim2.new(0, 10, 0, 54)
+body.Size = UDim2.new(1, -12, 1, -42)
+body.Position = UDim2.new(0, 6, 0, 38)
 body.BackgroundTransparency = 1
+body.BorderSizePixel = 0
+body.ScrollBarThickness = 4
+body.ScrollBarImageColor3 = COLORS.panelBorder
+body.CanvasSize = UDim2.new()
+body.AutomaticCanvasSize = Enum.AutomaticSize.Y
 body.Parent = armyWindow
+combatLabel.Parent = body
 ensure(body, "UIListLayout", "Layout", function(l)
-	l.Padding = UDim.new(0, 8)
+	l.Padding = UDim.new(0, 6)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
 end)
 
 --------------------------------------------------------------------------------
--- STATS-BAR (Gesamt-Armee-Werte)
+-- STATS-BAR (Gesamt-Armee-Werte) - kompakt, 3 Werte pro Zeile (Grid statt
+-- einer breiten horizontalen Reihe, damit alles in 280px Breite passt)
 --------------------------------------------------------------------------------
 local statsBar = Instance.new("Frame")
 statsBar.Name = "StatsBar"
 statsBar.LayoutOrder = 1
-statsBar.Size = UDim2.new(1, 0, 0, 70)
+statsBar.Size = UDim2.new(1, 0, 0, 66)
 statsBar.BackgroundColor3 = COLORS.panelBg
 statsBar.BorderSizePixel = 0
 statsBar.Parent = body
 makeCorner(statsBar, 8)
 makeStroke(statsBar, 2, COLORS.panelBorder)
 ensure(statsBar, "UIPadding", "Padding", function(p)
-	p.PaddingTop = UDim.new(0, 8)
-	p.PaddingBottom = UDim.new(0, 8)
-	p.PaddingLeft = UDim.new(0, 12)
-	p.PaddingRight = UDim.new(0, 12)
+	p.PaddingTop = UDim.new(0, 6)
+	p.PaddingBottom = UDim.new(0, 6)
+	p.PaddingLeft = UDim.new(0, 8)
+	p.PaddingRight = UDim.new(0, 8)
 end)
 
 local statsRow = Instance.new("Frame")
 statsRow.Name = "StatsRow"
-statsRow.Size = UDim2.new(1, 0, 0, 26)
+statsRow.Size = UDim2.new(1, 0, 0, 36)
 statsRow.BackgroundTransparency = 1
 statsRow.Parent = statsBar
-ensure(statsRow, "UIListLayout", "Layout", function(l)
+ensure(statsRow, "UIGridLayout", "Layout", function(l)
 	l.FillDirection = Enum.FillDirection.Horizontal
-	l.Padding = UDim.new(0, 18)
+	l.FillDirectionMaxCells = 3
+	l.CellSize = UDim2.new(0, 82, 0, 16)
+	l.CellPadding = UDim2.new(0, 4, 0, 4)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
-	l.VerticalAlignment = Enum.VerticalAlignment.Center
 end)
 
 local function makeStatLabel(order, icon, color)
 	local l = Instance.new("TextLabel")
 	l.Name = "Stat_" .. order
 	l.LayoutOrder = order
-	l.Size = UDim2.new(0, 100, 1, 0)
 	l.BackgroundTransparency = 1
 	l.Font = FONT_VALUE
-	l.TextSize = 15
+	l.TextSize = 12
 	l.TextColor3 = color
 	l.TextXAlignment = Enum.TextXAlignment.Left
 	l.Text = icon .. " 0"
@@ -332,8 +347,8 @@ local lblMove     = makeStatLabel(5, "🏃", COLORS.movement)
 
 local hpBarBg = Instance.new("Frame")
 hpBarBg.Name = "HpBarBg"
-hpBarBg.Size = UDim2.new(1, 0, 0, 14)
-hpBarBg.Position = UDim2.new(0, 0, 0, 32)
+hpBarBg.Size = UDim2.new(1, 0, 0, 12)
+hpBarBg.Position = UDim2.new(0, 0, 0, 42)
 hpBarBg.BackgroundColor3 = Color3.fromRGB(30, 25, 20)
 hpBarBg.BorderSizePixel = 0
 hpBarBg.Parent = statsBar
@@ -383,7 +398,7 @@ slotsHeader.LayoutOrder = 1
 slotsHeader.Size = UDim2.new(1, 0, 0, 20)
 slotsHeader.BackgroundTransparency = 1
 slotsHeader.Font = FONT_VALUE
-slotsHeader.TextSize = 14
+slotsHeader.TextSize = 12
 slotsHeader.TextColor3 = COLORS.headerText
 slotsHeader.TextXAlignment = Enum.TextXAlignment.Left
 slotsHeader.Text = "🪖 UNITS"
@@ -412,24 +427,28 @@ slotsLayout.Parent = slotsContainer
 -- bei jedem Grid-Rebuild (siehe renderUnitSlots).
 
 --------------------------------------------------------------------------------
--- UNTERER BEREICH: UnitDetailsPanel (links) + ActionsPanel (rechts)
+-- UNTERER BEREICH: UnitDetailsPanel + ActionsPanel UNTEREINANDER gestapelt
+-- (statt nebeneinander) - passt so in die schmale 280px-Spalte.
 --------------------------------------------------------------------------------
 local lowerRow = Instance.new("Frame")
 lowerRow.Name = "LowerRow"
 lowerRow.LayoutOrder = 3
-lowerRow.Size = UDim2.new(1, 0, 1, -156)
+lowerRow.AutomaticSize = Enum.AutomaticSize.Y
+lowerRow.Size = UDim2.new(1, 0, 0, 0)
 lowerRow.BackgroundTransparency = 1
 lowerRow.Parent = body
 ensure(lowerRow, "UIListLayout", "Layout", function(l)
-	l.FillDirection = Enum.FillDirection.Horizontal
-	l.Padding = UDim.new(0, 8)
+	l.FillDirection = Enum.FillDirection.Vertical
+	l.Padding = UDim.new(0, 6)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
 end)
 
--- UNIT-DETAILS-PANEL (links)
+-- UNIT-DETAILS-PANEL (oben)
 local unitFrame = Instance.new("Frame")
 unitFrame.Name = "UnitDetailsPanel"
-unitFrame.Size = UDim2.new(0.55, 0, 1, 0)
+unitFrame.LayoutOrder = 1
+unitFrame.AutomaticSize = Enum.AutomaticSize.Y
+unitFrame.Size = UDim2.new(1, 0, 0, 0)
 unitFrame.BackgroundColor3 = COLORS.panelBg
 unitFrame.BorderSizePixel = 0
 unitFrame.Visible = false
@@ -437,23 +456,23 @@ unitFrame.Parent = lowerRow
 makeCorner(unitFrame, 8)
 makeStroke(unitFrame, 2, COLORS.panelBorder)
 ensure(unitFrame, "UIPadding", "Padding", function(p)
-	p.PaddingTop = UDim.new(0, 10)
-	p.PaddingBottom = UDim.new(0, 10)
-	p.PaddingLeft = UDim.new(0, 12)
-	p.PaddingRight = UDim.new(0, 12)
+	p.PaddingTop = UDim.new(0, 8)
+	p.PaddingBottom = UDim.new(0, 8)
+	p.PaddingLeft = UDim.new(0, 10)
+	p.PaddingRight = UDim.new(0, 10)
 end)
 ensure(unitFrame, "UIListLayout", "Layout", function(l)
-	l.Padding = UDim.new(0, 4)
+	l.Padding = UDim.new(0, 3)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
 end)
 
 local detailsHeader = Instance.new("TextLabel")
 detailsHeader.Name = "DetailsHeader"
 detailsHeader.LayoutOrder = 1
-detailsHeader.Size = UDim2.new(1, 0, 0, 18)
+detailsHeader.Size = UDim2.new(1, 0, 0, 16)
 detailsHeader.BackgroundTransparency = 1
 detailsHeader.Font = FONT_VALUE
-detailsHeader.TextSize = 13
+detailsHeader.TextSize = 11
 detailsHeader.TextColor3 = COLORS.headerText
 detailsHeader.TextXAlignment = Enum.TextXAlignment.Left
 detailsHeader.Text = "📋 UNIT-DETAILS"
@@ -462,10 +481,10 @@ detailsHeader.Parent = unitFrame
 local uName = Instance.new("TextLabel")
 uName.Name = "UnitNameLabel"
 uName.LayoutOrder = 2
-uName.Size = UDim2.new(1, 0, 0, 22)
+uName.Size = UDim2.new(1, 0, 0, 18)
 uName.BackgroundTransparency = 1
 uName.Font = FONT_VALUE
-uName.TextSize = 16
+uName.TextSize = 13
 uName.TextColor3 = COLORS.headerText
 uName.TextXAlignment = Enum.TextXAlignment.Left
 uName.TextTruncate = Enum.TextTruncate.AtEnd
@@ -475,10 +494,10 @@ uName.Parent = unitFrame
 local uClass = Instance.new("TextLabel")
 uClass.Name = "UnitClassLabel"
 uClass.LayoutOrder = 3
-uClass.Size = UDim2.new(1, 0, 0, 16)
+uClass.Size = UDim2.new(1, 0, 0, 14)
 uClass.BackgroundTransparency = 1
 uClass.Font = FONT_DESC
-uClass.TextSize = 12
+uClass.TextSize = 10
 uClass.TextColor3 = COLORS.textDim
 uClass.TextXAlignment = Enum.TextXAlignment.Left
 uClass.Text = ""
@@ -487,10 +506,10 @@ uClass.Parent = unitFrame
 local uHealth = Instance.new("TextLabel")
 uHealth.Name = "UnitHealthLabel"
 uHealth.LayoutOrder = 4
-uHealth.Size = UDim2.new(1, 0, 0, 18)
+uHealth.Size = UDim2.new(1, 0, 0, 16)
 uHealth.BackgroundTransparency = 1
 uHealth.Font = FONT_DESC
-uHealth.TextSize = 14
+uHealth.TextSize = 12
 uHealth.TextColor3 = COLORS.hp
 uHealth.TextXAlignment = Enum.TextXAlignment.Left
 uHealth.Text = ""
@@ -499,12 +518,12 @@ uHealth.Parent = unitFrame
 local uStatsRow = Instance.new("Frame")
 uStatsRow.Name = "UnitStatsRow"
 uStatsRow.LayoutOrder = 5
-uStatsRow.Size = UDim2.new(1, 0, 0, 18)
+uStatsRow.Size = UDim2.new(1, 0, 0, 16)
 uStatsRow.BackgroundTransparency = 1
 uStatsRow.Parent = unitFrame
 ensure(uStatsRow, "UIListLayout", "Layout", function(l)
 	l.FillDirection = Enum.FillDirection.Horizontal
-	l.Padding = UDim.new(0, 12)
+	l.Padding = UDim.new(0, 8)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
 end)
 
@@ -512,10 +531,10 @@ local function makeUnitStatLabel(order, color)
 	local l = Instance.new("TextLabel")
 	l.Name = "UStat_" .. order
 	l.LayoutOrder = order
-	l.Size = UDim2.new(0, 60, 1, 0)
+	l.Size = UDim2.new(0, 55, 1, 0)
 	l.BackgroundTransparency = 1
 	l.Font = FONT_DESC
-	l.TextSize = 13
+	l.TextSize = 11
 	l.TextColor3 = color
 	l.TextXAlignment = Enum.TextXAlignment.Left
 	l.Text = ""
@@ -529,12 +548,12 @@ local uDefense = makeUnitStatLabel(2, COLORS.defense)
 local uStatsRow2 = Instance.new("Frame")
 uStatsRow2.Name = "UnitStatsRow2"
 uStatsRow2.LayoutOrder = 6
-uStatsRow2.Size = UDim2.new(1, 0, 0, 18)
+uStatsRow2.Size = UDim2.new(1, 0, 0, 16)
 uStatsRow2.BackgroundTransparency = 1
 uStatsRow2.Parent = unitFrame
 ensure(uStatsRow2, "UIListLayout", "Layout", function(l)
 	l.FillDirection = Enum.FillDirection.Horizontal
-	l.Padding = UDim.new(0, 12)
+	l.Padding = UDim.new(0, 8)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
 end)
 
@@ -542,10 +561,10 @@ local function makeUnitStatLabel2(order, color)
 	local l = Instance.new("TextLabel")
 	l.Name = "UStat2_" .. order
 	l.LayoutOrder = order
-	l.Size = UDim2.new(0, 60, 1, 0)
+	l.Size = UDim2.new(0, 55, 1, 0)
 	l.BackgroundTransparency = 1
 	l.Font = FONT_DESC
-	l.TextSize = 13
+	l.TextSize = 11
 	l.TextColor3 = color
 	l.TextXAlignment = Enum.TextXAlignment.Left
 	l.Text = ""
@@ -556,33 +575,35 @@ end
 local uSight = makeUnitStatLabel2(1, COLORS.sight)
 local uMovement = makeUnitStatLabel2(2, COLORS.movement)
 
--- ACTIONS-PANEL (rechts)
+-- ACTIONS-PANEL (unten, unter dem UnitDetailsPanel gestapelt)
 local actionsPanel = Instance.new("Frame")
 actionsPanel.Name = "ActionsPanel"
-actionsPanel.Size = UDim2.new(0.45, -8, 1, 0)
+actionsPanel.LayoutOrder = 2
+actionsPanel.AutomaticSize = Enum.AutomaticSize.Y
+actionsPanel.Size = UDim2.new(1, 0, 0, 0)
 actionsPanel.BackgroundColor3 = COLORS.panelBg
 actionsPanel.BorderSizePixel = 0
 actionsPanel.Parent = lowerRow
 makeCorner(actionsPanel, 8)
 makeStroke(actionsPanel, 2, COLORS.panelBorder)
 ensure(actionsPanel, "UIPadding", "Padding", function(p)
-	p.PaddingTop = UDim.new(0, 10)
-	p.PaddingBottom = UDim.new(0, 10)
-	p.PaddingLeft = UDim.new(0, 10)
-	p.PaddingRight = UDim.new(0, 10)
+	p.PaddingTop = UDim.new(0, 8)
+	p.PaddingBottom = UDim.new(0, 8)
+	p.PaddingLeft = UDim.new(0, 8)
+	p.PaddingRight = UDim.new(0, 8)
 end)
 ensure(actionsPanel, "UIListLayout", "Layout", function(l)
-	l.Padding = UDim.new(0, 8)
+	l.Padding = UDim.new(0, 6)
 	l.SortOrder = Enum.SortOrder.LayoutOrder
 end)
 
 local actionsHeader = Instance.new("TextLabel")
 actionsHeader.Name = "ActionsHeader"
 actionsHeader.LayoutOrder = 1
-actionsHeader.Size = UDim2.new(1, 0, 0, 18)
+actionsHeader.Size = UDim2.new(1, 0, 0, 16)
 actionsHeader.BackgroundTransparency = 1
 actionsHeader.Font = FONT_VALUE
-actionsHeader.TextSize = 13
+actionsHeader.TextSize = 11
 actionsHeader.TextColor3 = COLORS.headerText
 actionsHeader.TextXAlignment = Enum.TextXAlignment.Left
 actionsHeader.Text = "🛠️ AKTIONEN"
@@ -591,9 +612,9 @@ actionsHeader.Parent = actionsPanel
 local buildBtn = Instance.new("TextButton")
 buildBtn.Name = "BuildCampButton"
 buildBtn.LayoutOrder = 2
-buildBtn.Size = UDim2.new(1, 0, 0, 34)
+buildBtn.Size = UDim2.new(1, 0, 0, 28)
 buildBtn.Font = FONT_VALUE
-buildBtn.TextSize = 14
+buildBtn.TextSize = 12
 buildBtn.TextColor3 = COLORS.btnText
 buildBtn.Text = "🏕️ Camp bauen"
 buildBtn.Parent = actionsPanel
@@ -603,9 +624,9 @@ wireButtonStyle(buildBtn, ACTION_COLORS)
 local stopSelectBtn = Instance.new("TextButton")
 stopSelectBtn.Name = "StopSelectButton"
 stopSelectBtn.LayoutOrder = 3
-stopSelectBtn.Size = UDim2.new(1, 0, 0, 34)
+stopSelectBtn.Size = UDim2.new(1, 0, 0, 28)
 stopSelectBtn.Font = FONT_VALUE
-stopSelectBtn.TextSize = 14
+stopSelectBtn.TextSize = 12
 stopSelectBtn.TextColor3 = COLORS.btnText
 stopSelectBtn.Text = "❌ Auswahl aufheben"
 stopSelectBtn.Parent = actionsPanel
@@ -615,9 +636,9 @@ wireButtonStyle(stopSelectBtn, ACTION_COLORS)
 local watchBtn = Instance.new("TextButton")
 watchBtn.Name = "WatchCombatButton"
 watchBtn.LayoutOrder = 4
-watchBtn.Size = UDim2.new(1, 0, 0, 34)
+watchBtn.Size = UDim2.new(1, 0, 0, 28)
 watchBtn.Font = FONT_VALUE
-watchBtn.TextSize = 14
+watchBtn.TextSize = 12
 watchBtn.TextColor3 = Color3.new(1, 1, 1)
 watchBtn.Text = "👁️ Kampf ansehen"
 watchBtn.Visible = false
@@ -628,10 +649,10 @@ wireButtonStyle(watchBtn, { normal = Color3.fromRGB(150, 70, 60), hover = Color3
 local previewLabel = Instance.new("TextLabel")
 previewLabel.Name = "PreviewLabel"
 previewLabel.LayoutOrder = 5
-previewLabel.Size = UDim2.new(1, 0, 0, 18)
+previewLabel.Size = UDim2.new(1, 0, 0, 14)
 previewLabel.BackgroundTransparency = 1
 previewLabel.Font = FONT_DESC
-previewLabel.TextSize = 12
+previewLabel.TextSize = 10
 previewLabel.TextColor3 = COLORS.textDim
 previewLabel.TextXAlignment = Enum.TextXAlignment.Left
 previewLabel.Text = "👁️ Vorschau"
@@ -640,7 +661,7 @@ previewLabel.Parent = actionsPanel
 local hoverImageBg = Instance.new("Frame")
 hoverImageBg.Name = "HoverUnitImageBg"
 hoverImageBg.LayoutOrder = 6
-hoverImageBg.Size = UDim2.new(0, 96, 0, 96)
+hoverImageBg.Size = UDim2.new(0, 70, 0, 70)
 hoverImageBg.BackgroundColor3 = COLORS.slotEmptyBg
 hoverImageBg.BorderSizePixel = 0
 hoverImageBg.Parent = actionsPanel
