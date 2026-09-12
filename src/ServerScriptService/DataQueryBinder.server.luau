@@ -36,6 +36,7 @@ local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
 local ArmySystem = require(script.Parent:WaitForChild("ArmySystem"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
+local TechTreeSystem = require(script.Parent:WaitForChild("TechTreeSystem"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -136,6 +137,7 @@ local function getEmpireData(player)
 	return {
 		playerName = player.Name,
 		gold = PlayerData.GetGold(player),
+		researchPerRound = TechTreeSystem.GetTotalRP(player), -- fuer das Fantasy-Overlay (rein additive Anzeige)
 		armyCount = #ArmyData.GetArmiesByOwner(player),
 		campCount = #CampData.GetCampsByOwner(player),
 		cityCount = #CityData.GetCitiesByOwner(player),
