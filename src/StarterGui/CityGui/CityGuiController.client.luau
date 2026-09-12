@@ -14,8 +14,10 @@
     SUB-SCRIPTS (CityStatsSync, GrowthBarController, JobAssignmentController,
     ResourceOverviewController): ihre komplette Funktionalität wurde HIER
     integriert (ein einziger Controller, wie bei den anderen *Gui-Controllern
-    im Projekt). Die 4 Dateien existieren weiterhin, sind aber zu kurzen
-    "deprecated"-Stubs geworden, die nichts mehr tun (siehe deren Kommentare).
+    im Projekt). Die 4 Dateien existieren als Dateien weiterhin (Deprecated-
+    Stubs, siehe deren Kommentare), werden aber als GUI-Instanzen beim
+    Spielstart mit allen anderen alten CityGui-Children per Destroy()
+    entfernt (siehe Cleanup-Block unten) - sie laufen also nie tatsächlich.
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -166,15 +168,25 @@ local function makeStroke(parent, thickness, color, transparency)
 end
 
 --------------------------------------------------------------------------------
--- Altes CityFrame aufräumen (CLEANUP, "sicherere Alternative" aus dem Task):
+-- ALTE GUI VOLLSTÄNDIG ENTFERNEN (CLEANUP)
+--
 -- Das komplette alte, manuell gebaute CityFrame (inkl. seiner rbxm-Kinder
--- und der 4 alten Sub-Scripts, die jetzt nur noch Deprecated-Stubs sind)
--- wird beim Start entfernt. Alle GUI-Elemente werden im Folgenden neu und
--- ausschließlich per Code direkt unter der CityGui (ScreenGui) erzeugt.
+-- und der 4 alten Sub-Scripts CityStatsSync/GrowthBarController/
+-- JobAssignmentController/ResourceOverviewController) wird beim Start
+-- entfernt. Zusätzlich werden defensiv ALLE anderen Children direkt unter
+-- CityGui gelöscht (falls z.B. eines der alten Sub-Scripts jemals direkt
+-- unter CityGui statt unter CityFrame lag) - nur das Controller-Script
+-- selbst (dieses Script) bleibt unangetastet.
+--
+-- WICHTIG: Ab hier darf NICHTS mehr auf die alten Elemente zugreifen
+-- (z.B. cityFrame:FindFirstChild("FarmerLabel")). Alle GUI-Elemente
+-- werden im Folgenden komplett neu per Code direkt unter der CityGui
+-- (ScreenGui) erzeugt.
 --------------------------------------------------------------------------------
-local legacyCityFrame = cityGui:FindFirstChild("CityFrame")
-if legacyCityFrame then
-	legacyCityFrame:Destroy()
+for _, child in ipairs(cityGui:GetChildren()) do
+	if child ~= script then
+		child:Destroy()
+	end
 end
 
 --------------------------------------------------------------------------------
