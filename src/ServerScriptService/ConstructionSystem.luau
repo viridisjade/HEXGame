@@ -477,6 +477,59 @@ end
 -- Baufortschritt auf 100% und schliesst das Item sofort ab (gleicher
 -- Effekt wie normales Fertigwerden durch Industrie).
 --------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+-- CancelBuildOrder(cityId, player, orderId) -> success, reason
+-- Entfernt EIN Item (egal ob aktiv oder wartend) aus der Bau-/
+-- Rekrutierungs-Queue der Stadt (X-Button in der Queue-Kachel).
+--   - Gebäude: Ghost-Model wird entfernt, das Hex wird wieder freigegeben
+--     (sonst bliebe es für immer als "Construction:<Typ>" blockiert).
+--   - Units: bereits abgezogene Bevölkerung (citizenCost) wird zurückerstattet.
+-- Bereits eingebrachte Industrie-Fortschritte verfallen ersatzlos (kein
+-- Gold-/Industrie-Refund) - das entspricht der einfachsten, unmissverständ-
+-- lichen Regel und vermeidet Exploits (queuen -> canceln -> Industrie behalten).
+--------------------------------------------------------------------------------
+function ConstructionSystem.CancelBuildOrder(cityId, player, orderId)
+	local city = CityData.GetCity(cityId)
+	if not city then return false, "Stadt nicht gefunden" end
+	if city.owner ~= player then return false, "Stadt gehört dir nicht" end
+
+	-- Order VOR dem Entfernen suchen, um orderType/Felder für die
+	-- Aufräumarbeiten (Ghost/Hex/Bevölkerung) zu kennen.
+	local target = nil
+	for _, order in ipairs(city.buildQueue or {}) do
+		if order.id == orderId then
+			target = order
+			break
+		end
+	end
+	if not target then return false, "Nicht in der Warteschlange" end
+
+	local removed = CityData.RemoveBuildOrder(cityId, orderId)
+	if not removed then return false, "Nicht in der Warteschlange" end
+
+	if removed.orderType == "Unit" then
+		local popCost = tonumber(removed.citizenCost) or 0
+		if popCost > 0 then
+			city.population = (tonumber(city.population) or 0) + popCost
+		end
+	else
+		-- Building: Ghost-Model + Hex-Reservierung aufräumen.
+		local folder = getWorkspaceBuildings()
+		local ghost = folder:FindFirstChild("Ghost_" .. removed.buildingType .. "_" .. removed.q .. "_" .. removed.r)
+		if ghost then ghost:Destroy() end
+		HexData.ClearHexField(removed.q, removed.r, "building")
+	end
+
+	print("[ConstructionSystem] " .. player.Name .. " hat "
+		.. tostring(removed.buildingType or removed.unitType) .. " aus der Warteschlange entfernt")
+
+	if _G.NotifyCityStatsChanged then
+		_G.NotifyCityStatsChanged(cityId)
+	end
+
+	return true, nil
+end
+
 function ConstructionSystem.BuyInstantComplete(cityId, player)
 	local city = CityData.GetCity(cityId)
 	if not city then return false, "Stadt nicht gefunden" end

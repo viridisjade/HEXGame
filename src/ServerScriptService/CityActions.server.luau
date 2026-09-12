@@ -152,6 +152,23 @@ onEvent("RequestInstantBuy", function(player, cityId)
 end)
 
 --------------------------------------------------------------------------------
+-- RequestCancelBuildOrder
+-- Entfernt ein Item (aktiv oder wartend) aus der Bau-/Rekrutierungs-Queue.
+--------------------------------------------------------------------------------
+onEvent("RequestCancelBuildOrder", function(player, cityId, orderId)
+	if not isId(cityId) then return end
+	if not isNumber(orderId, 1) then return end
+
+	local success, reason = ConstructionSystem.CancelBuildOrder(cityId, player, orderId)
+
+	if success then
+		print("[CityActions] " .. player.Name .. " hat Queue-Item " .. tostring(orderId) .. " in Stadt " .. tostring(cityId) .. " entfernt")
+	else
+		warn("[CityActions] Queue-Entfernen abgelehnt: " .. tostring(reason))
+	end
+end)
+
+--------------------------------------------------------------------------------
 -- RequestFoundCity
 -- Wandelt ein Camp in eine Stadt um
 --------------------------------------------------------------------------------
