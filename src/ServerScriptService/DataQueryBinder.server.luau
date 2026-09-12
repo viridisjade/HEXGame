@@ -98,6 +98,7 @@ local function getArmyDetail(player, armyId)
 				id = unit.id,
 				unitType = unit.unitType,
 				name = cfg and cfg.Name or unit.unitType,
+				class = cfg and cfg.Class or "",
 				icon = cfg and cfg.Icon or "",
 				currentLP = unit.currentLP or 0,
 				maxLP = unit.maxLP or (cfg and cfg.Stats and cfg.Stats.LP) or 0,

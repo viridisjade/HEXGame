@@ -41,7 +41,7 @@ ArmyDataCache.OnUpdated = updatedEvent.Event
 -- Get() -> army or nil
 -- Ein Army-Snapshot ist von der Form:
 --   { id, name, q, r, ownerName, stats = {LP,MaxLP,Attack,Defense,Sight,Movement,MaxMovement},
---     units = { { id, unitType, name, icon, currentLP, maxLP, attack, defense, sight,
+--     units = { { id, unitType, name, class, icon, currentLP, maxLP, attack, defense, sight,
 --                 currentMovement, maxMovement, alive } } }
 --------------------------------------------------------------------------------
 function ArmyDataCache.Get()
