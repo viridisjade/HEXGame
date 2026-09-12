@@ -126,7 +126,7 @@ end
 --------------------------------------------------------------------------------
 local empireFrame = Instance.new("Frame")
 empireFrame.Name = "EmpireFrame"
-empireFrame.Size = UDim2.new(0.5, 0, 0, 90)
+empireFrame.Size = UDim2.new(0.4, 0, 0, 110)
 empireFrame.Position = UDim2.new(1, -10, 0, 10)
 empireFrame.AnchorPoint = Vector2.new(1, 0)
 empireFrame.BackgroundColor3 = COLORS.windowBg
