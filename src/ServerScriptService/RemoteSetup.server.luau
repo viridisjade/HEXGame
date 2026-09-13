@@ -118,6 +118,7 @@ ensure(dataRemotes, "RemoteEvent", "DiplomacyUpdate")
 ensure(dataRemotes, "RemoteEvent", "DiplomacyNotification")
 ensure(dataRemotes, "RemoteFunction", "GetDiplomacyState")
 ensure(dataRemotes, "RemoteFunction", "GetDiplomacyPlayers")
+ensure(dataRemotes, "RemoteFunction", "GetDiplomacyAllianceInfo")
 
 -- Fog of War: server -> client push (Init = voller State beim Join, Update = Delta)
 ensure(dataRemotes, "RemoteEvent", "FogOfWarInit")

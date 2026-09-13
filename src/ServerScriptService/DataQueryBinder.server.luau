@@ -37,6 +37,8 @@ local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
 local ArmySystem = require(script.Parent:WaitForChild("ArmySystem"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
 local TechTreeSystem = require(script.Parent:WaitForChild("TechTreeSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -65,22 +67,63 @@ local function getArmyOwner(player, armyId)
 end
 
 -- Diplomatie-Playerliste: alle anderen Spieler + Farbe + Beziehung.
+-- Zusaetzlich (rein additive Anzeige-Felder, keine Balance-Aenderung):
+--   allianceInfo    - eigene Allianz-Groesse/-Punkte fuer die Kopfzeile
+--                      des Diplomatie-Fensters ("Allianz: 2/3 Mitglieder",
+--                      "Allianz-Punkte: 850/1500").
+--   allianceFull    - true, wenn ein Allianzantrag an DIESEN Spieler die
+--                      Max-Mitgliederzahl ueberschreiten wuerde (Client
+--                      graut den Allianz-Button dann aus).
 local function getDiplomacyPlayers(player)
 	if not player then return {} end
 	local Players = game:GetService("Players")
 	local result = {}
+
+	local myAllianceId = PlayerData.GetAllianceId(player)
+	local maxMembers = VictoryConfig.MAX_ALLIANCE_MEMBERS
+
 	for _, other in ipairs(Players:GetPlayers()) do
 		if other ~= player then
+			local otherAllianceId = PlayerData.GetAllianceId(other)
+			-- Kombinierte Groesse, falls beide Allianzen zusammengefuehrt wuerden
+			-- (bzw. der jeweils andere Spieler beitritt). Rein additive
+			-- Vorschau, damit der Client den Button ausgrauen kann.
+			local combinedSize
+			if myAllianceId and myAllianceId == otherAllianceId then
+				combinedSize = #DiplomacySystem.GetAllianceMembers(player)
+			else
+				local mySize = myAllianceId and #DiplomacySystem.GetAllianceMembers(player) or 1
+				local otherSize = otherAllianceId and #DiplomacySystem.GetAllianceMembers(other) or 1
+				combinedSize = mySize + otherSize
+			end
+
 			result[#result + 1] = {
 				userId = other.UserId,
 				name = other.Name,
 				color = PlayerData.GetColor(other),
 				relation = DiplomacySystem.GetRelation(player, other),
+				allianceFull = combinedSize > maxMembers,
 			}
 		end
 	end
 	table.sort(result, function(a, b) return a.name < b.name end)
 	return result
+end
+
+-- Eigene Allianz-Info fuer die Kopfzeile des Diplomatie-Fensters (rein
+-- additive Anzeige, aendert keine Spielregeln).
+local function getDiplomacyAllianceInfo(player)
+	if not player then return { size = 1, maxSize = VictoryConfig.MAX_ALLIANCE_MEMBERS, points = 0 } end
+	local allianceId = PlayerData.GetAllianceId(player)
+	local size = allianceId and #DiplomacySystem.GetAllianceMembers(player) or 1
+	local points = allianceId and PointSystem.GetAlliancePoints(allianceId) or PointSystem.GetPoints(player)
+	return {
+		inAlliance = allianceId ~= nil,
+		size = size,
+		maxSize = VictoryConfig.MAX_ALLIANCE_MEMBERS,
+		points = points,
+		targetPoints = VictoryConfig.ALLIANCE_WIN_POINTS,
+	}
 end
 
 -- Kompletter Army-Snapshot in EINEM Call fuer die ArmyGui.
@@ -255,6 +298,7 @@ local QUERIES = {
 	-- SPIELER & KLICK
 	GetEmpireData       = getEmpireData,         -- mit Lazy-Init
 	GetDiplomacyPlayers = getDiplomacyPlayers,   -- fuer das Diplomatie-Fenster
+	GetDiplomacyAllianceInfo = getDiplomacyAllianceInfo, -- Allianz-Kopfzeile (additiv)
 	GetHexInfo          = getHexInfo,            -- für den WorldClickRouter
 }
 

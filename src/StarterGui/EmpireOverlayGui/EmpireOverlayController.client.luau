@@ -280,111 +280,15 @@ wireButtonStyle(diplomacyButton)
 
 --------------------------------------------------------------------------------
 -- DIPLOMATIE: der Diplomatie-Button togglet das Diplomatie-Fenster.
--- Das Fenster wird DIREKT ueber das DiplomacyOverlay (Visible) im DiplomacyGui
--- umgeschaltet. Damit der Klick IMMER etwas bewirkt, wird bei fehlendem
--- DiplomacyGui/DiplomacyOverlay ein Platzhalter erstellt. Zusaetzlich wird
--- das ClientState-Event gefeuert, damit der DiplomacyGuiController beim
--- Oeffnen die Daten nachlaedt.
+-- Das DiplomacyGui (eigene ScreenGui) ist komplett code-generiert und
+-- verwaltet sein Enabled/Toggle-Verhalten selbst (analog zu ToggleTechTree).
+-- Der Button muss daher nur noch das gemeinsame ClientState-Event feuern.
 --------------------------------------------------------------------------------
 diplomacyButton.Active = true
 diplomacyButton.AutoButtonColor = true
 diplomacyButton.Interactable = true
 
-local function addCorner(obj, radius)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius or 6)
-	c.Parent = obj
-end
-
--- Setzt das Fenster absolut auf open/close. Quelle der Wahrheit ist die
--- tatsaechliche GUI (dipGui.Enabled + overlay.Visible), damit der CloseButton
--- des DiplomacyGuiController das Fenster nicht "dedupelt".
-local function applyDiplomacyOpen(dipGui, overlay, open)
-	open = (open == true)
-	if dipGui then dipGui.Enabled = open end
-	if overlay then overlay.Visible = open end
-end
-
 diplomacyButton.Activated:Connect(function()
-	local PlayersService = game:GetService("Players")
-	local playerGui = PlayersService.LocalPlayer and PlayersService.LocalPlayer:FindFirstChild("PlayerGui")
-	if not playerGui then return end
-
-	-- 1) DiplomacyGui ScreenGui sicherstellen (Platzhalter bei Bedarf).
-	local dipGui = playerGui:FindFirstChild("DiplomacyGui")
-	if not dipGui then
-		dipGui = Instance.new("ScreenGui")
-		dipGui.Name = "DiplomacyGui"
-		dipGui.IgnoreGuiInset = true
-		dipGui.ResetOnSpawn = false
-		dipGui.DisplayOrder = 20
-		dipGui.Parent = playerGui
-		-- Zu Beginn geschlossen: Enabled=false, damit der ERSTE Klick oeffnet.
-		dipGui.Enabled = false
-		print("[EmpireOverlay] DiplomacyGui fehlte - Platzhalter-ScreenGui erstellt")
-	end
-
-	-- 2) DiplomacyOverlay Frame sicherstellen (Platzhalter bei Bedarf).
-	local overlay = dipGui:FindFirstChild("DiplomacyOverlay")
-	if not overlay then
-		overlay = Instance.new("Frame")
-		overlay.Name = "DiplomacyOverlay"
-		overlay.Size = UDim2.fromScale(0.7, 0.72)
-		overlay.AnchorPoint = Vector2.new(0.5, 0.5)
-		overlay.Position = UDim2.new(0.5, 0, 0.5, 0)
-		overlay.BackgroundColor3 = Color3.fromRGB(10, 10, 16)
-		overlay.BackgroundTransparency = 0.12
-		overlay.BorderSizePixel = 0
-		-- Zu Beginn unsichtbar (Visible=true waere ein Default und liesse beim
-		-- ersten Klick das Fenster als "offen" erscheinen).
-		overlay.Visible = false
-		overlay.Parent = dipGui
-		addCorner(overlay, 12)
-
-		local title = Instance.new("TextLabel")
-		title.Name = "TitleLabel"
-		title.Size = UDim2.new(1, 0, 0, 44)
-		title.BackgroundTransparency = 1
-		title.Font = Enum.Font.GothamBold
-		title.TextSize = 26
-		title.TextColor3 = Color3.fromRGB(255, 205, 90)
-		title.Text = "Diplomatie"
-		title.Parent = overlay
-
-		local closeButton = Instance.new("TextButton")
-		closeButton.Name = "CloseButton"
-		closeButton.Size = UDim2.fromOffset(40, 40)
-		closeButton.Position = UDim2.new(1, -50, 0, 12)
-		closeButton.BackgroundColor3 = Color3.fromRGB(70, 70, 82)
-		closeButton.BorderSizePixel = 0
-		closeButton.Font = Enum.Font.GothamBold
-		closeButton.TextSize = 20
-		closeButton.TextColor3 = Color3.fromRGB(238, 240, 248)
-		closeButton.Text = "✕"
-		closeButton.Parent = overlay
-		addCorner(closeButton)
-
-		closeButton.Activated:Connect(function()
-			applyDiplomacyOpen(dipGui, overlay, false)
-		end)
-
-		print("[EmpireOverlay] DiplomacyOverlay fehlte - Platzhalter-Frame gebaut")
-	end
-
-	-- 3) Toggle: Zustand AUS der tatsaechlichen GUI ableiten (nicht aus einer
-	--    ggf. veralteten Variable) und umschalten. So verhaelt sich der Button
-	--    korrekt, auch wenn das Fenster ueber den CloseButton des
-	--    DiplomacyGuiController geschlossen wurde.
-	local wasOpen = dipGui.Enabled and overlay.Visible
-	local willOpen = not wasOpen
-	applyDiplomacyOpen(dipGui, overlay, willOpen)
-	if willOpen then
-		print("[EmpireOverlay] Diplomatie-Fenster geöffnet")
-	else
-		print("[EmpireOverlay] Diplomatie-Fenster geschlossen")
-	end
-
-	-- Event feuern (Controller laedt beim Oeffnen Daten nach).
 	ClientState.FireToggleDiplomacy()
 end)
 print("[EmpireOverlay] DiplomacyOverlayButton mit DiplomatieGui verbunden")
