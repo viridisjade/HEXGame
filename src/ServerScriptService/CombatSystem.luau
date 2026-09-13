@@ -1178,14 +1178,27 @@ function CombatSystem.ResolveCitySiege(combat, winnerSide, byFlight, hexQ, hexR,
 					-- HAUPTSTADT erobert -> Eliminierung (wie beim normalen
 					-- CityConquered-Pfad neutralisiert EliminatePlayer alle
 					-- Staedte/Camps des Verlierers, inkl. dieser Hauptstadt).
+					-- EliminatePlayer setzt city.owner NUR auf nil (neutral) -
+					-- die Stadt (inkl. Province) muss danach explizit an den
+					-- Eroberer uebertragen werden, sonst bleibt sie besitzlos.
 					pcall(VictorySystem.EliminatePlayer, defenderOwner, attackerOwner,
 						"Hauptstadt erobert")
+					if attackerOwner then
+						CityData.SetOwner(cityId, attackerOwner)
+						if city.provinceId then
+							pcall(ClaimSystem.ClaimProvince, attackerOwner, city.provinceId)
+						end
+					end
 				else
 					CityData.SetOwner(cityId, attackerOwner)
 					if city.provinceId and defenderOwner and attackerOwner then
 						pcall(ClaimSystem.TransferProvince, defenderOwner, attackerOwner,
 							city.provinceId)
 					end
+				end
+
+				if _G.NotifyCityStatsChanged then
+					_G.NotifyCityStatsChanged(cityId)
 				end
 			end
 		elseif campId then
@@ -1207,6 +1220,12 @@ function CombatSystem.ResolveCitySiege(combat, winnerSide, byFlight, hexQ, hexR,
 			pcall(PointSystem.DeductPoints, defenderOwner, "CitySiegeLost",
 				VictoryConfig.LOSS_POINTS.CitySiegeLost)
 		end
+
+		-- Fog of War: Stadt/Camp ist jetzt eine Sichtquelle des neuen
+		-- Besitzers (EndCombat hat UpdateVision bereits VOR diesem
+		-- Besitzerwechsel aufgerufen) - beide Seiten neu berechnen.
+		if attackerOwner then pcall(FogOfWarSystem.UpdateVision, attackerOwner) end
+		if defenderOwner then pcall(FogOfWarSystem.UpdateVision, defenderOwner) end
 
 		pcall(VictorySystem.CheckVictory)
 
@@ -1400,16 +1419,44 @@ function CombatSystem.EndCombat(combat, winnerSide, byFlight)
 					if city and city.owner == loserOwner then
 						if PlayerData.GetCapitalCityId(loserOwner) == city.id then
 							-- HAUPTSTADT erobert -> Eliminierung des Besitzers.
+							-- EliminatePlayer uebertraegt NICHT automatisch an den
+							-- Eroberer (es neutralisiert nur), darum die Stadt
+							-- (inkl. Province) danach explizit dem Eroberer geben.
 							pcall(VictorySystem.EliminatePlayer, loserOwner, winnerOwner,
 								"Hauptstadt erobert")
+							CityData.SetOwner(city.id, winnerOwner)
+							if city.provinceId then
+								pcall(ClaimSystem.ClaimProvince, winnerOwner, city.provinceId)
+							end
 						else
 							pcall(PointSystem.AwardPoints, winnerOwner, "CityConquered",
 								VictoryConfig.ACTIVE_POINTS.CityConquered)
 							pcall(PointSystem.DeductPoints, loserOwner, "CityLost",
 								VictoryConfig.LOSS_POINTS.CityLost)
-							-- Stadt an den Eroberer uebertragen.
-							city.owner = winnerOwner
+							-- Stadt (Owner + Bau-Queue) an den Eroberer uebertragen.
+							CityData.SetOwner(city.id, winnerOwner)
+							CityData.ClearBuildQueue(city.id)
+							-- Province mit uebertragen, sonst bleibt sie neutral/
+							-- beim alten Besitzer, obwohl die Stadt schon dem
+							-- neuen Besitzer gehoert.
+							if city.provinceId then
+								pcall(ClaimSystem.TransferProvince, loserOwner, winnerOwner,
+									city.provinceId)
+							end
 						end
+
+						-- Client-Caches (CityGui etc.) informieren, sonst denkt
+						-- der Client noch, der alte Besitzer haette die Stadt.
+						if _G.NotifyCityStatsChanged then
+							_G.NotifyCityStatsChanged(city.id)
+						end
+
+						-- Fog of War: Die Stadt ist jetzt eine Sichtquelle des
+						-- NEUEN Besitzers, nicht mehr des alten - beide Seiten
+						-- neu berechnen (oben lief UpdateVision noch VOR dem
+						-- Owner-Wechsel).
+						pcall(FogOfWarSystem.UpdateVision, winnerOwner)
+						pcall(FogOfWarSystem.UpdateVision, loserOwner)
 					end
 				end
 			end

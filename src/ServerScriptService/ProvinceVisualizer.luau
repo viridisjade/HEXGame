@@ -305,4 +305,32 @@ function ProvinceVisualizer.getProvinceColors()
 	return provinceColors
 end
 
+--------------------------------------------------------------------------------
+-- RecolorProvince(provinceId, newColor)
+-- Faerbt alle Parts unter workspace/HexMap/ProvinceVisuals/Province_<id>/
+-- sofort auf newColor um (z.B. nach einem Besitzerwechsel durch Stadt-
+-- Eroberung, siehe ClaimSystem.TransferProvince/CombatSystem.ResolveCitySiege).
+-- Aequivalent zu ClaimSystem.recolorProvinceVisuals, aber als oeffentliche
+-- API auf ProvinceVisualizer selbst (fuer Aufrufer, die kein ClaimSystem
+-- requiren wollen/koennen).
+--------------------------------------------------------------------------------
+function ProvinceVisualizer.RecolorProvince(provinceId, newColor)
+	local hexMap = workspace:FindFirstChild("HexMap")
+	if not hexMap then return false end
+
+	local provinceVisuals = hexMap:FindFirstChild("ProvinceVisuals")
+	if not provinceVisuals then return false end
+
+	local provinceModel = provinceVisuals:FindFirstChild("Province_" .. provinceId)
+	if not provinceModel then return false end
+
+	for _, part in ipairs(provinceModel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Color = newColor
+		end
+	end
+
+	return true
+end
+
 return ProvinceVisualizer

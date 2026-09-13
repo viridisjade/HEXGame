@@ -197,7 +197,12 @@ end
 -- SetProvinceOwner(id, owner)
 --------------------------------------------------------------------------------
 function ProvinceData.SetProvinceOwner(id, owner)
-	return ProvinceData.UpdateProvince(id, { owner = owner })
+	local ok = ProvinceData.UpdateProvince(id, { owner = owner })
+	if ok then
+		print("[ProvinceData] Owner von Province", id, "geändert zu",
+			owner and (owner.Name or tostring(owner)) or "niemand")
+	end
+	return ok
 end
 
 --------------------------------------------------------------------------------

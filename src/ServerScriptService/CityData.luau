@@ -367,6 +367,8 @@ function CityData.SetOwner(cityId, newOwner)
 	local city = cities[cityId]
 	if not city then return false end
 	city.owner = newOwner
+	print("[CityData] Owner von City", cityId, "geändert zu",
+		newOwner and newOwner.Name or "niemand")
 	return true
 end
 

@@ -288,13 +288,27 @@ local function immediateOccupation(attackerArmyId, q, r, targetType, targetRecor
 
 		if wasCapital and defenderOwner then
 			local VictorySystem = require(script.Parent:WaitForChild("VictorySystem"))
+			-- EliminatePlayer setzt city.owner NUR auf nil (neutral) - die
+			-- Stadt (inkl. Province) muss danach explizit an den Eroberer
+			-- uebertragen werden, sonst bleibt sie besitzlos/neutral.
 			pcall(VictorySystem.EliminatePlayer, defenderOwner, attackerOwner, "Hauptstadt erobert (unbewohnt)")
+			if attackerOwner then
+				CityData.SetOwner(targetRecord.id, attackerOwner)
+				if targetRecord.provinceId then
+					local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
+					pcall(ClaimSystem.ClaimProvince, attackerOwner, targetRecord.provinceId)
+				end
+			end
 		else
 			CityData.SetOwner(targetRecord.id, attackerOwner)
 			if targetRecord.provinceId and defenderOwner and attackerOwner then
 				local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
 				pcall(ClaimSystem.TransferProvince, defenderOwner, attackerOwner, targetRecord.provinceId)
 			end
+		end
+
+		if _G.NotifyCityStatsChanged then
+			_G.NotifyCityStatsChanged(targetRecord.id)
 		end
 	elseif targetType == "camp" then
 		CampData.SetOwner(targetRecord.id, attackerOwner)
