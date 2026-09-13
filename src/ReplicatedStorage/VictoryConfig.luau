@@ -45,6 +45,12 @@ VictoryConfig.ACTIVE_POINTS = {
 	GoldTech         = 40,
 	CampBuilt        = 25,
 	ProvinceClaimed  = 15,
+
+	-- NEU: Stadt-Besetzung mit Buergerwehr (siehe MovementHandler/CombatSystem).
+	-- Getrennt von CityConquered/CityLost, da dieser Belagerungs-Ablauf ein
+	-- eigenstaendiges Feature mit eigenen, explizit vorgegebenen Werten ist.
+	CitySiegeWon     = 100,  -- Angreifer erobert eine belagerte Stadt/Camp
+	CityDefended     = 25,   -- Verteidiger wehrt eine Belagerung erfolgreich ab
 }
 
 --------------------------------------------------------------------------------
@@ -54,6 +60,9 @@ VictoryConfig.LOSS_POINTS = {
 	CityLost     = 75,
 	CampLost     = 25,
 	ProvinceLost = 10,
+
+	-- NEU: Gegenstueck zu CitySiegeWon (Stadt-Besetzung mit Buergerwehr).
+	CitySiegeLost = 100,
 }
 
 return VictoryConfig

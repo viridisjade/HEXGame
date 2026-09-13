@@ -240,6 +240,18 @@ function CampData.RemoveCitizens(campId, amount)
 end
 
 --------------------------------------------------------------------------------
+-- SetOwner(campId, newOwner)
+-- Besitzerwechsel nach Camp-Besetzung (siehe MovementHandler/CombatSystem
+-- Bürgerwehr-Belagerungs-Ablauf). Gebäude bleiben erhalten.
+--------------------------------------------------------------------------------
+function CampData.SetOwner(campId, newOwner)
+	local camp = camps[campId]
+	if not camp then return false end
+	camp.owner = newOwner
+	return true
+end
+
+--------------------------------------------------------------------------------
 -- ERTRÄGE PRO RUNDE
 --------------------------------------------------------------------------------
 function CampData.GetFoodPerRound(campId)

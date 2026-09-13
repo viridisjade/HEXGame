@@ -207,6 +207,72 @@ function CityEconomySystem.RemovePopulation(cityId, amount)
 	CityEconomySystem.AddPopulation(cityId, -num(amount))
 end
 
+--------------------------------------------------------------------------------
+-- ApplyCombatCasualties(cityId, deadCount) -> number (tatsaechlich entfernt)
+-- Nach einer gescheiterten Stadt-Verteidigung (Buergerwehr-Belagerung, siehe
+-- MovementHandler/CombatSystem): reduziert die Bevoelkerung um deadCount und
+-- gibt Job-Plaetze der Toten frei.
+--
+-- Reihenfolge:
+--   1. Zuerst arbeitslose Buerger abziehen (kein Job-Effekt).
+--   2. Danach zufaellig aus den belegten Jobs abziehen (Farmer/Worker/
+--      Trader/Scientist), damit der freie Platz spaeter von
+--      AutoAssignWorkers neu besetzt werden kann.
+-- Bevoelkerung faellt nie unter 0.
+--------------------------------------------------------------------------------
+function CityEconomySystem.ApplyCombatCasualties(cityId, deadCount)
+	local city = CityData.GetCity(cityId)
+	if not city or not deadCount or deadCount <= 0 then return 0 end
+
+	local removed = 0
+	local toRemove = math.min(deadCount, num(city.population))
+
+	-- 1) Arbeitslose zuerst.
+	local assigned = 0
+	if city.jobs then
+		for _, count in pairs(city.jobs) do
+			assigned = assigned + num(count)
+		end
+	end
+	local unemployed = math.max(0, num(city.population) - assigned)
+	local fromUnemployed = math.min(unemployed, toRemove)
+	removed = removed + fromUnemployed
+	toRemove = toRemove - fromUnemployed
+
+	-- 2) Zufaellig aus belegten Jobs (Job-Platz wird frei fuer Neuzuweisung).
+	if toRemove > 0 and city.jobs then
+		local jobTypes = { "farmer", "worker", "trader", "scientist" }
+		local guard = 0
+		while toRemove > 0 and guard < 1000 do
+			guard = guard + 1
+			-- Nur Jobtypen mit mind. 1 belegtem Platz sind Kandidaten.
+			local candidates = {}
+			for _, jobType in ipairs(jobTypes) do
+				if num(city.jobs[jobType]) > 0 then
+					table.insert(candidates, jobType)
+				end
+			end
+			if #candidates == 0 then break end
+
+			local pick = candidates[math.random(1, #candidates)]
+			city.jobs[pick] = num(city.jobs[pick]) - 1
+			removed = removed + 1
+			toRemove = toRemove - 1
+		end
+	end
+
+	city.population = math.max(0, num(city.population) - removed)
+
+	if removed > 0 then
+		CityEconomySystem.UpdateStats(cityId)
+		if _G.NotifyCityStatsChanged then _G.NotifyCityStatsChanged(cityId) end
+		print("[CityEconomy] Stadt " .. tostring(city.name) .. ": " .. removed
+			.. " Buerger durch Belagerung gestorben (Bevoelkerung jetzt " .. city.population .. ")")
+	end
+
+	return removed
+end
+
 function CityEconomySystem.GetJobWithMostWorkers(cityId)
 	local city = CityData.GetCity(cityId)
 	if not city or not city.jobs then return nil end

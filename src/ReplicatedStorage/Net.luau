@@ -21,6 +21,9 @@ local ROOT = {
 	RoundEnd = true, SkipRound = true,
 	RequestRoute = true, ConfirmMove = true,
 	CancelMove = true,
+	-- Stadt-Besetzung mit Buergerwehr (Popup-Bestaetigung, siehe
+	-- MovementHandler): Client -> Server Antwort auf CityAttackPopup.
+	RequestAttackCity = true,
 	-- Turn based combat (client -> server)
 	CombatSelectUnit = true, CombatSelectTarget = true,
 	CombatAutoResolve = true,

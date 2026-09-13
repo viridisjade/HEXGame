@@ -29,6 +29,14 @@
         isWildlife      : boolean,
         wildlifeScale   : number,
         log             : { string },
+
+        -- NEU: Stadt-Besetzung mit Buergerwehr (siehe MovementHandler).
+        -- Nur gesetzt, wenn der Verteidiger eine temporaere Buergerwehr-Armee
+        -- ist. CombatSystem.EndCombat() prueft dieses Feld, um nach dem Kampf
+        -- die Besetzungs-Logik auszuloesen (Besitzerwechsel, Buergerverluste,
+        -- Bau-Queue leeren, eigene Punkte-Werte).
+        siegeInfo       : { cityId: number?, campId: number?, hexQ: number,
+                             hexR: number, initialCitizens: number }?,
     }
 
     UnitEntry = { id, name, icon, class, attack, defense, currentLP, maxLP,
@@ -100,6 +108,10 @@ function CombatState.Create(data)
 		isWildlife = data.isWildlife or false,
 		wildlifeScale = data.wildlifeScale or 1,
 		log = {},
+
+		-- NEU: nil bei normalen Kaempfen, gesetzt bei Stadt-Besetzung
+		-- (siehe MovementHandler.RequestAttackCity).
+		siegeInfo = data.siegeInfo,
 	}
 
 	combats[id] = combat

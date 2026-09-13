@@ -357,6 +357,32 @@ function CityData.RemoveBuildOrder(cityId, orderId)
 	return nil
 end
 
+--------------------------------------------------------------------------------
+-- SetOwner(cityId, newOwner)
+-- Besitzerwechsel nach Stadt-Besetzung (siehe MovementSystem/CombatSystem
+-- Bürgerwehr-Belagerungs-Ablauf). Gebäude bleiben erhalten, nur der Owner
+-- und (ueber ClaimSystem separat) die Province wechseln.
+--------------------------------------------------------------------------------
+function CityData.SetOwner(cityId, newOwner)
+	local city = cities[cityId]
+	if not city then return false end
+	city.owner = newOwner
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- ClearBuildQueue(cityId)
+-- Bricht ALLE laufenden/wartenden Bauprojekte ab (Besetzung). Gebaeude
+-- selbst (city.buildings) bleiben unangetastet - nur die Warteschlange fuer
+-- NEUE Bauprojekte wird geleert.
+--------------------------------------------------------------------------------
+function CityData.ClearBuildQueue(cityId)
+	local city = cities[cityId]
+	if not city then return false end
+	city.buildQueue = {}
+	return true
+end
+
 function CityData.RemoveCity(cityId)
 	local city = cities[cityId]
 	if not city then return end

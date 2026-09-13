@@ -136,6 +136,14 @@ ensure(ReplicatedStorage, "RemoteFunction", "RequestRoute")
 ensure(ReplicatedStorage, "RemoteEvent", "ConfirmMove")
 ensure(ReplicatedStorage, "RemoteEvent", "CancelMove")
 
+-- Stadt-Besetzung mit Buergerwehr: Client -> Server Antwort auf das
+-- Angriffs-Popup (root level, mirrored in Net.ROOT), Server -> Client
+-- Popup-Anfrage + Kampf-Ergebnis (DataRemotes, ueber Net-Fallback gefunden).
+ensure(ReplicatedStorage, "RemoteEvent", "RequestAttackCity")
+ensure(dataRemotes, "RemoteEvent", "CityAttackPopup")
+ensure(dataRemotes, "RemoteEvent", "CityAttackResult")
+
+
 -- Turn based combat input (root level, mirrored in Net.ROOT)
 ensure(ReplicatedStorage, "RemoteEvent", "CombatSelectUnit")
 ensure(ReplicatedStorage, "RemoteEvent", "CombatSelectTarget")

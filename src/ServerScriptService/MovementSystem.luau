@@ -210,6 +210,30 @@ function MovementSystem.GetReachableSteps(path, movementPoints)
 end
 
 --------------------------------------------------------------------------------
+-- GetEffectiveMovementPoints(armyId) -> number
+-- Bewegungspunkte inkl. TECH-Bonus (Road Building), exakt wie
+-- MoveArmyAlongPath sie fuer den tatsaechlichen Bewegungsschritt berechnet.
+-- Wird von MovementHandler benutzt, um VOR der Bewegung zu wissen, welches
+-- Hex eine Armee diese Runde wirklich erreicht (Stadt-Besetzung-Check).
+--------------------------------------------------------------------------------
+function MovementSystem.GetEffectiveMovementPoints(armyId)
+	local army = ArmyData.GetArmy(armyId)
+	if not army then return 0 end
+
+	local stats = army.stats
+	local movementPoints = stats and stats.Movement or 0
+
+	local tech = Tech()
+	if tech and army.owner and movementPoints > 0 then
+		local startHex = HexData.GetHex(army.q, army.r)
+		local onOwnLand = (startHex ~= nil and startHex.owner == army.owner)
+		movementPoints += tech.GetMovementBonus(army.owner, nil, onOwnLand)
+	end
+
+	return movementPoints
+end
+
+--------------------------------------------------------------------------------
 -- MoveArmyAlongPath(armyId, path, maxSteps, startStep) -> stepsCompleted
 --------------------------------------------------------------------------------
 function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
@@ -233,20 +257,8 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 		return 0
 	end
 
-	-- Aktuelle Bewegungspunkte dieser Runde
-	local stats = army.stats
-	local movementPoints = stats and stats.Movement or 0
-
-	----------------------------------------------------------------------
-	-- TECH: Road Building grants +1 movement while the army starts on
-	-- its own territory (hex.owner == army owner).
-	----------------------------------------------------------------------
-	local tech = Tech()
-	if tech and army.owner and movementPoints > 0 then
-		local startHex = HexData.GetHex(army.q, army.r)
-		local onOwnLand = (startHex ~= nil and startHex.owner == army.owner)
-		movementPoints += tech.GetMovementBonus(army.owner, nil, onOwnLand)
-	end
+	-- Aktuelle Bewegungspunkte dieser Runde (inkl. TECH-Bonus Road Building).
+	local movementPoints = MovementSystem.GetEffectiveMovementPoints(armyId)
 
 	local remaining = movementPoints
 	local stepsToTake = 0

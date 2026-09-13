@@ -89,6 +89,35 @@ UnitConfig.Units = {
 			Movement = 6,
 		},
 	},
+
+	--------------------------------------------------------------------------
+	-- CitizenMilitia ("Bürgerwehr")
+	-- Spawned automatically (server side only) when an undefended enemy city
+	-- or camp is attacked. NEVER recruitable (IndustryCost/CitizenCost = 0,
+	-- NotRecruitable = true), NEVER given a visible 3D model (Movement = 0,
+	-- no ArmySpawner call is ever made for it) - it exists purely as combat
+	-- data for the duration of the siege fight. See MovementSystem /
+	-- MovementHandler / CombatSystem for the full occupation flow.
+	--------------------------------------------------------------------------
+	CitizenMilitia = {
+		Name = "Bürgerwehr",
+		Model = "",
+		Icon = "rbxassetid://CITIZENMILITIA_ICON_ID",
+		Class = "Melee",
+		Ability = nil,
+		IndustryCost = 0,
+		CitizenCost = 0,
+		NotRecruitable = true,
+		Stats = {
+			LP = 15,
+			Attack = 12,
+			Defense = 15,   -- PERCENT damage absorption (0-70) - base value,
+			                -- city/capital/bastion bonuses are added on top
+			                -- when the militia is created (see MovementHandler).
+			Sight = 2,
+			Movement = 0,   -- cannot move, cannot flee
+		},
+	},
 }
 
 function UnitConfig.GetUnit(unitId)
