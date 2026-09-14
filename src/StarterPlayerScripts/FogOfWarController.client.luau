@@ -43,6 +43,21 @@ local FogOfWarConfig = require(ReplicatedStorage:WaitForChild("FogOfWarConfig"))
 print("[FogOfWarController] geladen (LocalScript laeuft)")
 
 --------------------------------------------------------------------------------
+-- HEX-STATE-EVENT (fuer externe Listener, z.B. CityBannerController)
+-- Rein additiv: feuert (key, state) JEDES MAL, wenn setHexState() ein Hex
+-- aktualisiert. Andere LocalScripts koennen darueber ihre eigenen an ein
+-- Gebaeude gebundenen Overlays (z.B. das Fantasy-Banner ueber Staedten)
+-- synchron zum Fog-of-War schalten, ohne dass dieses Script etwas ueber
+-- Banner wissen muss.
+--------------------------------------------------------------------------------
+local hexStateEvent = ReplicatedStorage:FindFirstChild("FogOfWarHexStateChanged")
+if not hexStateEvent then
+	hexStateEvent = Instance.new("BindableEvent")
+	hexStateEvent.Name = "FogOfWarHexStateChanged"
+	hexStateEvent.Parent = ReplicatedStorage
+end
+
+--------------------------------------------------------------------------------
 -- STATE + FOLDER-REFERENZEN
 --------------------------------------------------------------------------------
 local hexMapFolder = nil
@@ -288,6 +303,10 @@ local function setHexState(key, state)
 	applyTransparency(findSoilModel(q, r), t)
 	applyTransparency(findBuilding(q, r), buildingT)
 	applyTransparency(findProvinceModel(q, r), provinceT)
+
+	-- Externe Listener (z.B. CityBannerController) ueber den neuen
+	-- Sicht-Zustand dieses Hex informieren.
+	hexStateEvent:Fire(key, state)
 end
 
 --------------------------------------------------------------------------------

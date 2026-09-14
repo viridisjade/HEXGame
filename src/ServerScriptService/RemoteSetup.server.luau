@@ -75,6 +75,7 @@ ensure(dataRemotes, "RemoteFunction", "GetCity")
 ensure(dataRemotes, "RemoteFunction", "GetCityOnHex")
 ensure(dataRemotes, "RemoteFunction", "GetBuildingCosts")
 ensure(dataRemotes, "RemoteFunction", "GetCitySpawnHexes")
+ensure(dataRemotes, "RemoteFunction", "GetCityPublicInfo")
 
 ensure(dataRemotes, "RemoteFunction", "GetEmpireData")
 ensure(dataRemotes, "RemoteFunction", "GetRoundData")

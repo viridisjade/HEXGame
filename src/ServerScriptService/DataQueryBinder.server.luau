@@ -199,6 +199,34 @@ local function getCitySpawnHexes(player, cityId)
 	return ConstructionSystem.GetValidSpawnHexes(cityId)
 end
 
+-- Oeffentliche Stadt-Info fuer das Fantasy-Banner ueber Staedten (auch
+-- fuer FREMDE Staedte gedacht - deshalb OHNE Besitz-Pruefung wie
+-- getCitySpawnHexes). Rein additive Lese-Abfrage, aendert nichts.
+local function getCityPublicInfo(player, cityId)
+	local city = CityData.GetCity(cityId)
+	if not city then
+		return { exists = false }
+	end
+
+	local owner = city.owner
+	local buildingCount = (city.buildings and #city.buildings) or 0
+	local population = tonumber(city.population) or tonumber(city.citizenCount) or 0
+
+	return {
+		exists      = true,
+		id          = city.id,
+		name        = city.name,
+		q           = city.q,
+		r           = city.r,
+		ownerUserId = owner and owner.UserId or nil,
+		ownerName   = owner and owner.Name or "Niemand",
+		ownerColor  = owner and PlayerData.GetColor(owner) or Color3.fromRGB(140, 140, 140),
+		isMine      = (owner ~= nil and owner == player),
+		buildingCount = buildingCount,
+		population    = population,
+	}
+end
+
 -- Alles was auf einem Hex steht (für den WorldClickRouter)
 local function getHexInfo(player, q, r)
 	q = tonumber(q)
@@ -294,6 +322,7 @@ local QUERIES = {
 	GetCityOnHex        = drop(CityData.GetCityOnHex),
 	GetBuildingCosts    = drop(BuildingCostSystem.GetAllBuildingCosts),
 	GetCitySpawnHexes   = getCitySpawnHexes,     -- nur eigene Städte
+	GetCityPublicInfo   = getCityPublicInfo,     -- oeffentlich (Fantasy-Banner), ohne Besitz-Pruefung
 
 	-- SPIELER & KLICK
 	GetEmpireData       = getEmpireData,         -- mit Lazy-Init
