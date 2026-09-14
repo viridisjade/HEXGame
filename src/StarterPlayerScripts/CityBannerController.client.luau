@@ -73,7 +73,10 @@ local FogOfWarConfig = require(ReplicatedStorage:WaitForChild("FogOfWarConfig"))
 
 Net.Warmup({ "GetCityOnHex", "GetCityPublicInfo" })
 
-print("[CityBannerController] geladen (LocalScript laeuft)")
+print("[CityBannerController v2] geladen (LocalScript laeuft)"
+	.. " - Banner werden ausschliesslich von diesem Script erzeugt (Owner-Marker:"
+	.. " CityBannerController-v2). Erscheint diese Zeile DOPPELT im Output,"
+	.. " laeuft eine zweite Banner-Script-Instanz im Place.")
 
 --------------------------------------------------------------------------------
 -- STIL
@@ -100,6 +103,30 @@ local bannerByCityId = {} -- [cityId] = hexKey
 -- Der Heal-Loop nutzt das, um Banner nachzuladen, die sonst nie ein
 -- FogOfWarHexStateChanged-Event bekommen wuerden.
 local fogSourceAvailable = false
+
+--------------------------------------------------------------------------------
+-- OWNER-MARKER + BANNER-NAMEN
+--
+-- Jedes von DIESEM Script erzeugte Banner traegt das Attribut "BannerOwner".
+-- Damit lassen sich eigene Banner von FREMD-Bannern unterscheiden. Das ist
+-- die Diagnose fuer den gemeldeten Befund "oft ZWEI BillboardGuis namens
+-- CityBanner unter dem Part": Diese eine Script-Version kann keine zwei
+-- Banner offen lassen (destroyStrayBanners VOR + enforceSingleBanner NACH
+-- dem Erzeugen + Dedupe-Sweep). Taucht trotzdem regelmaessig ein Banner
+-- OHNE Marker auf, laeuft im Place eine ZWEITE (aeltere, z.B. manuell in
+-- Studio angelegte und nie von Rojo ersetzte) Banner-Script-Instanz -
+-- die dann auch fuer Enabled=false/"..."/grau verantwortlich ist.
+--------------------------------------------------------------------------------
+local BANNER_OWNER_TAG = "CityBannerController-v2"
+
+local function isBannerGui(instance)
+	return instance:IsA("BillboardGui")
+		and (instance.Name == "CityBanner" or instance.Name == "CapitalBanner")
+end
+
+local function isOwnBanner(instance)
+	return isBannerGui(instance) and instance:GetAttribute("BannerOwner") == BANNER_OWNER_TAG
+end
 
 --------------------------------------------------------------------------------
 -- HILFSFUNKTIONEN
@@ -132,7 +159,7 @@ local function findAdorneePart(buildingModel)
 	return nil
 end
 
--- DEDUPE-FIX (Schritt 5): entfernt ALLE bereits vorhandenen Banner-
+-- DEDUPE-FIX: entfernt AGGRESSIV ALLE bereits vorhandenen Banner-
 -- BillboardGuis eines City-Gebäudes, egal ob sie (wie frueher, siehe
 -- ADORNEE-BUG) direkt am Model haengen oder (aktuell korrekt) am
 -- PrimaryPart. Wird IMMER unmittelbar VOR dem Erzeugen eines neuen
@@ -141,12 +168,18 @@ end
 -- Skript-Version, einem Reload oder einer Race-Condition stammt.
 local function destroyStrayBanners(buildingModel)
 	local removed = 0
+	local foreign = 0
+
 	for _, child in ipairs(buildingModel:GetDescendants()) do
-		if child:IsA("BillboardGui") and (child.Name == "CityBanner" or child.Name == "CapitalBanner") then
+		if isBannerGui(child) then
+			if not isOwnBanner(child) then
+				foreign = foreign + 1
+			end
 			child:Destroy()
 			removed = removed + 1
 		end
 	end
+
 	-- Auch direkt am Model selbst pruefen (GetDescendants deckt das zwar
 	-- schon ab, aber FindFirstChild ist ein billiger zusaetzlicher Check
 	-- fuer den Fall, dass buildingModel selbst kein Model, sondern schon
@@ -154,31 +187,45 @@ local function destroyStrayBanners(buildingModel)
 	for _, name in ipairs({ "CityBanner", "CapitalBanner" }) do
 		local direct = buildingModel:FindFirstChild(name)
 		if direct and direct:IsA("BillboardGui") then
+			if not isOwnBanner(direct) then
+				foreign = foreign + 1
+			end
 			direct:Destroy()
 			removed = removed + 1
 		end
+	end
+
+	if foreign > 0 then
+		warn(("[Banner] DIAGNOSE: %d Banner OHNE Owner-Marker (%s) an %s entfernt."
+			.. " Laeuft im Place eine zweite/aeltere Banner-Script-Instanz?"
+			.. " (Studio -> StarterPlayerScripts auf doppelte LocalScripts pruefen)")
+			:format(foreign, BANNER_OWNER_TAG, buildingModel:GetFullName()))
 	end
 	if removed > 0 then
 		print(("[Banner] %d verwaiste Banner-BillboardGui(s) an %s entfernt")
 			:format(removed, buildingModel:GetFullName()))
 	end
+	return removed
 end
 
 -- SINGLE-BANNER-GARANTIE (Fix "teilweise 2 Banner im Model"):
 -- Laesst an einem City-Gebaeude GENAU EIN Banner stehen. keepBillboard
 -- bleibt erhalten, jede andere Banner-BillboardGui wird entfernt -
 -- unabhaengig davon, woher sie stammt (Altlast einer frueheren Version,
--- parallel laufender Rebuild, Model das aus einem alten Spielstand
--- geladen wurde, ...). Wird nach jedem Erzeugen und periodisch im
--- Heal-Loop aufgerufen.
+-- parallel laufender Rebuild, zweite Script-Instanz, Model das aus einem
+-- alten Spielstand geladen wurde, ...). Wird nach jedem Erzeugen und
+-- periodisch im Heal-Loop aufgerufen.
 local function enforceSingleBanner(buildingModel, keepBillboard)
 	if not buildingModel or not buildingModel.Parent then return 0 end
 
 	local removed = 0
+	local foreign = 0
+
 	for _, child in ipairs(buildingModel:GetDescendants()) do
-		if child:IsA("BillboardGui")
-			and (child.Name == "CityBanner" or child.Name == "CapitalBanner")
-			and child ~= keepBillboard then
+		if isBannerGui(child) and child ~= keepBillboard then
+			if not isOwnBanner(child) then
+				foreign = foreign + 1
+			end
 			child:Destroy()
 			removed = removed + 1
 		end
@@ -188,11 +235,19 @@ local function enforceSingleBanner(buildingModel, keepBillboard)
 	for _, name in ipairs({ "CityBanner", "CapitalBanner" }) do
 		local direct = buildingModel:FindFirstChild(name)
 		if direct and direct:IsA("BillboardGui") and direct ~= keepBillboard then
+			if not isOwnBanner(direct) then
+				foreign = foreign + 1
+			end
 			direct:Destroy()
 			removed = removed + 1
 		end
 	end
 
+	if foreign > 0 then
+		warn(("[Banner] DIAGNOSE: %d doppelte(s) Banner OHNE Owner-Marker (%s) an %s entfernt."
+			.. " Verdacht: eine zweite/aeltere Banner-Script-Instanz im Place erzeugt sie neu.")
+			:format(foreign, BANNER_OWNER_TAG, buildingModel:GetFullName()))
+	end
 	if removed > 0 then
 		warn(("[Banner] %d doppelte Banner-BillboardGui(s) an %s entfernt - nur 1 pro City erlaubt")
 			:format(removed, buildingModel:GetFullName()))
@@ -213,6 +268,10 @@ local function buildBannerGui(adorneePart, isCapital, initialText, initialColor)
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = isCapital and "CapitalBanner" or "CityBanner"
+	-- Owner-Marker: kennzeichnet dieses Banner als von DIESEM Script erzeugt
+	-- (Basis fuer die Fremd-Banner-Diagnose in destroyStrayBanners /
+	-- enforceSingleBanner).
+	billboard:SetAttribute("BannerOwner", BANNER_OWNER_TAG)
 	billboard.Size = isCapital and UDim2.new(0, 250, 0, 70) or UDim2.new(0, 200, 0, 50)
 	billboard.StudsOffset = isCapital and Vector3.new(0, 10, 0) or Vector3.new(0, 8, 0)
 	billboard.AlwaysOnTop = true
@@ -1116,9 +1175,9 @@ end)
 -- HEAL-LOOP (Selbstheilung, 1x pro Sekunde)
 --
 -- Faengt alles ab, was ueber Events allein nicht sicher abgedeckt ist:
---   1. Fog-Zustand: Event verpasst (Banner entstand NACH dem letzten
---      Zustandswechsel) oder FogOfWarController laedt erst spaeter ->
---      Zustand neu lesen und anwenden. Ohne das bleibt Enabled = false.
+--   1. Fog-Zustand: wird JEDE Sekunde fuer JEDES Banner erzwungen
+--      (Polling-Fallback). Deckt verpasste Events, einen fehlenden/zu
+--      spaet ladenden FogOfWarController und fremde Eingriffe ab.
 --   2. Daten: Banner ohne aufgeloeste Info (Text "...", graue Farbe) ->
 --      langsamer Retry, bis Name/Farbe vom Server da sind.
 --   3. Duplikate: es haengt mehr als ein Banner am Gebaeude -> ueberzaehlige
@@ -1128,6 +1187,7 @@ end)
 --------------------------------------------------------------------------------
 local DEDUPE_SWEEP_INTERVAL = 5
 local lastDedupeSweep = 0
+local fogWarningShown = false
 
 task.spawn(function()
 	while true do
@@ -1137,6 +1197,16 @@ task.spawn(function()
 		local doDedupeSweep = (now - lastDedupeSweep) >= DEDUPE_SWEEP_INTERVAL
 		if doDedupeSweep then
 			lastDedupeSweep = now
+		end
+
+		-- Einmalige Diagnose, falls die Fog-Quelle fehlt (dann greift das
+		-- Fail-Open und Banner koennen in unerforschtem Gebiet sichtbar sein,
+		-- bis der FogOfWarController laeuft).
+		if not fogSourceAvailable and not fogWarningShown then
+			fogWarningShown = true
+			warn("[Banner] _G.GetFogHexState nicht verfuegbar (FogOfWarController"
+				.. " laeuft nicht / noch nicht geladen?) -> Fail-Open aktiv:"
+				.. " Banner werden als 'visible' behandelt, bis die Quelle da ist.")
 		end
 
 		-- 5) Cities OHNE Banner-Eintrag nachtraeglich anhaengen (Replikations-
@@ -1157,14 +1227,15 @@ task.spawn(function()
 				-- 4) Gebaeude existiert nicht mehr.
 				removeBannerByKey(key)
 			else
-				-- 1) Fog-Zustand heilen.
+				-- 1) Fog-Zustand ERZWINGEN (Polling-Fallback, 1x/s).
+				--    Bewusst UNBEDINGT (nicht nur bei erkannder Aenderung):
+				--    damit ein Banner niemals in einem Enabled=false-Zustand
+				--    haengen bleibt, den irgend etwas anderes gesetzt hat
+				--    (verpasstes Event, zweite Script-Instanz, Studio-Reload).
+				--    currentFogState() ist fail-open: ohne _G.GetFogHexState
+				--    liefert es VISIBLE statt UNEXPLORED.
 				if entry.billboard and entry.billboard.Parent then
-					local state = currentFogState(key)
-					local wronglyHidden = not entry.billboard.Enabled
-						and (entry.isMine or state ~= FogOfWarConfig.STATE.UNEXPLORED)
-					if state ~= entry.fogState or wronglyHidden or not fogSourceAvailable then
-						applyFogState(entry, state)
-					end
+					applyFogState(entry, currentFogState(key))
 
 					-- 3) Duplikate entfernen.
 					if doDedupeSweep then
@@ -1188,4 +1259,5 @@ task.spawn(function()
 	end
 end)
 
-print("[CityBannerController] Bereit.")
+print("[CityBannerController v2] Bereit. Heal-Loop aktiv (1s: Fog-State erzwingen,"
+	.. " Daten-Retry, Dedupe-Sweep alle " .. tostring(DEDUPE_SWEEP_INTERVAL) .. "s).")
