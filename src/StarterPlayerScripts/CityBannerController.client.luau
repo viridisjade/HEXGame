@@ -92,6 +92,39 @@ local function findAdorneePart(buildingModel)
 	return nil
 end
 
+-- DEDUPE-FIX (Schritt 5): entfernt ALLE bereits vorhandenen Banner-
+-- BillboardGuis eines City-Gebäudes, egal ob sie (wie frueher, siehe
+-- ADORNEE-BUG) direkt am Model haengen oder (aktuell korrekt) am
+-- PrimaryPart. Wird IMMER unmittelbar VOR dem Erzeugen eines neuen
+-- Banners aufgerufen, damit niemals mehr als 1 Banner pro Gebaeude
+-- existiert - unabhaengig davon, ob die Altlast von einer frueheren
+-- Skript-Version, einem Reload oder einer Race-Condition stammt.
+local function destroyStrayBanners(buildingModel)
+	local removed = 0
+	for _, child in ipairs(buildingModel:GetDescendants()) do
+		if child:IsA("BillboardGui") and (child.Name == "CityBanner" or child.Name == "CapitalBanner") then
+			child:Destroy()
+			removed = removed + 1
+		end
+	end
+	-- Auch direkt am Model selbst pruefen (GetDescendants deckt das zwar
+	-- schon ab, aber FindFirstChild ist ein billiger zusaetzlicher Check
+	-- fuer den Fall, dass buildingModel selbst kein Model, sondern schon
+	-- der Part ist).
+	for _, name in ipairs({ "CityBanner", "CapitalBanner" }) do
+		local direct = buildingModel:FindFirstChild(name)
+		if direct and direct:IsA("BillboardGui") then
+			direct:Destroy()
+			removed = removed + 1
+		end
+	end
+	if removed > 0 then
+		print(("[Banner] %d verwaiste Banner-BillboardGui(s) an %s entfernt")
+			:format(removed, buildingModel:GetFullName()))
+	end
+end
+
+
 --------------------------------------------------------------------------------
 -- BANNER-GUI ERZEUGEN (Fahnenform: Rechteck + 2 gedrehte Quadrate als
 -- Spitzen an den Enden). isCapital=true -> groesseres Gold-Design mit
@@ -110,6 +143,11 @@ local function buildBannerGui(adorneePart, isCapital)
 	billboard.Parent = adorneePart
 	print("[Banner] BillboardGui erstellt fuer " .. adorneePart:GetFullName()
 		.. (isCapital and " (HAUPTSTADT)" or ""))
+	print("[Banner] Enabled:", billboard.Enabled,
+		"| Adornee:", billboard.Adornee and billboard.Adornee:GetFullName() or "nil",
+		"| StudsOffset:", billboard.StudsOffset,
+		"| Size:", billboard.Size,
+		"| MaxDistance:", billboard.MaxDistance)
 
 	local root = Instance.new("Frame")
 	root.Name = "Root"
@@ -302,6 +340,9 @@ local function applyFogState(entry, state)
 		setElementsTransparency(entry, 0.5, 0.5, 0.5)
 	end
 	entry.fogState = state
+
+	print(("[Banner] Fog-Status fuer %s: %s -> Enabled: %s")
+		:format(entry.key, tostring(state), tostring(entry.billboard.Enabled)))
 end
 
 -- Aktuellen Fog-Zustand eines Hex ermitteln. Bevorzugt die synchrone
@@ -477,18 +518,49 @@ local function applyBannerInfo(entry, info)
 	entry.tipRight.BackgroundColor3 = color
 	entry.nameLabel.Text = tostring(info.name or "?")
 	entry.isMine = info.isMine and true or false
+
+	print(("[Banner] Owner: %s, Farbe: %s, Text: %s")
+		:format(tostring(info.ownerName), tostring(color), tostring(info.name)))
 end
 
-local function refreshBannerData(entry)
+-- RETRY-FIX (Schritt 2/3): GetCityOnHex/GetCityPublicInfo koennen kurz
+-- nach dem Erstellen eines Banners fehlschlagen (Remote noch nicht
+-- repliziert, CityData auf dem Server noch nicht committed, Netzwerk-
+-- Hickup, ...). Der alte Code hat bei einem einzigen fehlgeschlagenen
+-- Invoke einfach aufgegeben - das Banner blieb dann fuer immer beim
+-- Platzhaltertext "..." und der grauen Default-Farbe haengen, weil
+-- NICHTS sonst automatisch einen erneuten Versuch ausgeloest hat.
+-- Jetzt wird bei einem Fehlschlag bis zu MAX_RETRIES mal erneut
+-- versucht (mit kurzer Wartezeit dazwischen).
+local MAX_RETRIES = 8
+local RETRY_DELAY = 0.5
+
+local function refreshBannerData(entry, attempt)
+	attempt = attempt or 1
+
 	task.spawn(function()
 		local ok1, cityOnHex = Net.Invoke("GetCityOnHex", entry.q, entry.r)
-		if not ok1 or not cityOnHex or not cityOnHex.id then return end
+		if not ok1 or not cityOnHex or not cityOnHex.id then
+			warn(("[Banner] GetCityOnHex fehlgeschlagen fuer %s (Versuch %d/%d)")
+				:format(entry.key, attempt, MAX_RETRIES))
+			if attempt < MAX_RETRIES then
+				task.delay(RETRY_DELAY, function() refreshBannerData(entry, attempt + 1) end)
+			end
+			return
+		end
 
 		entry.cityId = cityOnHex.id
 		bannerByCityId[entry.cityId] = entry.key
 
 		local ok2, info = Net.Invoke("GetCityPublicInfo", entry.cityId)
-		if not ok2 or not info or not info.exists then return end
+		if not ok2 or not info or not info.exists then
+			warn(("[Banner] GetCityPublicInfo fehlgeschlagen fuer City %s (Versuch %d/%d)")
+				:format(tostring(entry.cityId), attempt, MAX_RETRIES))
+			if attempt < MAX_RETRIES then
+				task.delay(RETRY_DELAY, function() refreshBannerData(entry, attempt + 1) end)
+			end
+			return
+		end
 
 		local wantsCapital = info.isCapital and true or false
 		if wantsCapital ~= entry.isCapital then
@@ -515,6 +587,9 @@ local function attachBannerUi(buildingModel, isCapital)
 			.. " gefunden - Banner kann nicht angedockt werden!")
 		return nil
 	end
+	-- Schritt 5: sicherstellen, dass vor dem Neubau KEIN Alt-Banner mehr
+	-- an diesem Gebäude haengt (verhindert Duplikate).
+	destroyStrayBanners(buildingModel)
 	return buildBannerGui(adorneePart, isCapital)
 end
 
