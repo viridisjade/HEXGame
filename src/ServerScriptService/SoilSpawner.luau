@@ -30,8 +30,9 @@ local SoilSpawner = {}
 local ServerStorage = game:GetService("ServerStorage")
 local HexUtils = require(script.Parent:WaitForChild("HexUtils"))
 
--- Referenz auf die Soil-Templates
-local soilTemplatesFolder = ServerStorage:WaitForChild("SoilTemplates")
+-- Referenz auf die Soil-Templates (mit Timeout, damit bei fehlendem Ordner
+-- kein "Infinite yield possible" entsteht).
+local soilTemplatesFolder = ServerStorage:WaitForChild("SoilTemplates", 10)
 
 --------------------------------------------------------------------------------
 -- Workspace Folder erstellen / abrufen
@@ -117,6 +118,15 @@ end
 -- getTemplate(soilType) -> Model
 --------------------------------------------------------------------------------
 function SoilSpawner.getTemplate(soilType)
+	-- Ordner fehlt: Fallback statt Hänger.
+	if not soilTemplatesFolder then
+		warn("[SoilSpawner] ServerStorage > SoilTemplates fehlt - nutze Fallbacks")
+		if soilType == "Mountain" then
+			return getMountainFallbackTemplate()
+		end
+		return nil
+	end
+
 	-- Echtes Template immer zuerst suchen
 	local template = soilTemplatesFolder:FindFirstChild(soilType)
 

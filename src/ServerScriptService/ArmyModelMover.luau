@@ -15,9 +15,12 @@ local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
 --------------------------------------------------------------------------------
 -- KONFIGURATION
 --------------------------------------------------------------------------------
+-- HINWEIS: Die Ziel-Höhe pro Schritt kommt jetzt zentral aus
+-- HexHeightUtil.getSpawnHeight (Terrain-Oberkante + 0.5 Studs).
+-- HEIGHT_OFFSET bleibt nur noch als Kompatibilitätswert erhalten.
 ArmyModelMover.Config = {
 	STEP_DELAY = 0.35,
-	HEIGHT_OFFSET = 0.35,
+	HEIGHT_OFFSET = HexHeightUtil.SPAWN_HEIGHT_OFFSET,
 }
 
 --------------------------------------------------------------------------------
@@ -123,16 +126,18 @@ function ArmyModelMover.MoveModelToHex(armyId, q, r)
 		return
 	end
 
+	-- Ziel-Höhe pro Bewegungsschritt: dynamisch anhand der Terrain-Höhe des
+	-- Ziel-Hexes (Soil/Gebäude/Hex-Modell), damit die Army beim Umziehen von
+	-- z.B. Ebene1 auf Ebene2/Gebirge auf die neue Höhe angehoben/abgesenkt wird.
 	local worldPos = HexUtils.axialToWorld(q, r)
-	local topY = HexHeightUtil.getTopY(q, r)
-	local extraY = ArmyModelMover.Config.HEIGHT_OFFSET
+	local spawnY = HexHeightUtil.getSpawnHeight(q, r)
 
 	if model:IsA("Model") then
 		local bboxCf, bboxSize = model:GetBoundingBox()
 		local pivot = model:GetPivot()
 
 		local pivotToBottom = pivot.Position.Y - (bboxCf.Position.Y - bboxSize.Y / 2)
-		local targetPivotY = topY + extraY + pivotToBottom
+		local targetPivotY = spawnY + pivotToBottom
 
 		local originalRotation = pivot - pivot.Position
 		local targetCFrame = CFrame.new(worldPos.X, targetPivotY, worldPos.Z) * originalRotation
@@ -140,7 +145,7 @@ function ArmyModelMover.MoveModelToHex(armyId, q, r)
 		model:PivotTo(targetCFrame)
 	elseif model:IsA("BasePart") then
 		local halfY = model.Size.Y / 2
-		model.Position = Vector3.new(worldPos.X, topY + extraY + halfY, worldPos.Z)
+		model.Position = Vector3.new(worldPos.X, spawnY + halfY, worldPos.Z)
 	end
 end
 

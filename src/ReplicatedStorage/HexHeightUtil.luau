@@ -19,6 +19,11 @@
       2. Hex-Modell      (Hex_q_r)     <- Fallback wenn kein Soil existiert
       3. SPAWN_Y + 2     wenn nichts gefunden
     
+    getSpawnHeight(q, r) ist die Funktion für Unit-/Gebäude-Spawns:
+      Sie liest AUSSCHLIESSLICH das TERRAIN-Model (Hex_q_r unter den
+      Ebene-Ordnern), NICHT das Soil. Soil ist nur eine dünne Deko-Schicht
+      oben auf dem Terrain und für die Spawn-Höhe irrelevant.
+    
     Liegt in ReplicatedStorage, weil es Server UND Client brauchen
     (CityPlacementController ist ein LocalScript).
 --]]
@@ -87,6 +92,74 @@ function HexHeightUtil.getTopY(q, r)
 	end
 
 	return topY
+end
+
+--------------------------------------------------------------------------------
+-- getSpawnHeight(q, r) -> number
+-- Spawn-Höhe für Units und Gebäude: Oberkante des TERRAIN-Models (Ebene1,
+-- Ebene2, Ebene3_Gebirge, Ebene4_Bergspitze, ...) + fester Sicherheitsabstand.
+--
+-- WICHTIG: Hier zählt NUR das Terrain, NICHT das Soil!
+--   - Terrain (Hex_q_r unter Ebene1/Ebene2/...) ist die eigentliche Ebene
+--     mit ihrer Stufen-Höhe.
+--   - Soil (Soil_q_r_* unter Soils/...) ist nur eine dünne Deko-Schicht
+--     OBEN AUF dem Terrain. Seine Y-Position ist bereits die Terrain-
+--     Oberkante - würde man Soil + 0.5 nehmen, würden Units je nach
+--     Soil-Dicke leicht über dem Boden schweben.
+--
+-- Deshalb sucht diese Funktion ausschließlich in den Terrain-Ordnern und
+-- überspringt Soils/ProvinceVisuals/ArmyModels/Buildings bewusst.
+--------------------------------------------------------------------------------
+HexHeightUtil.SPAWN_HEIGHT_OFFSET = 0.5
+
+function HexHeightUtil.getSpawnHeight(q, r)
+	local hexMap = workspace:FindFirstChild("HexMap")
+	if not hexMap then
+		return HexGridConfig.Config.SPAWN_Y
+	end
+
+	local hexName = "Hex_" .. q .. "_" .. r
+	local terrainModel = nil
+
+	-- Nur durch die Terrain-Ordner suchen (Ebene1, Ebene2, Ebene3_Gebirge,
+	-- Ebene4_Bergspitze, Water, ...). Soils/Gebäude/Armeen werden übersprungen.
+	for _, folder in ipairs(hexMap:GetChildren()) do
+		if folder:IsA("Folder")
+			and folder.Name ~= "Soils"
+			and folder.Name ~= "ProvinceVisuals"
+			and folder.Name ~= "ArmyModels"
+			and folder.Name ~= "Buildings" then
+			local hex = folder:FindFirstChild(hexName)
+			if hex then
+				terrainModel = hex
+				break
+			end
+		end
+	end
+
+	if not terrainModel then
+		return HexGridConfig.Config.SPAWN_Y
+	end
+
+	-- Oberkante des TERRAIN-Models berechnen (Haupt-Part, nicht Soil).
+	local topY
+	if terrainModel:IsA("Model") then
+		if terrainModel.PrimaryPart then
+			topY = terrainModel.PrimaryPart.Position.Y + terrainModel.PrimaryPart.Size.Y / 2
+		else
+			local mainPart = terrainModel:FindFirstChildWhichIsA("BasePart")
+			if not mainPart then
+				return HexGridConfig.Config.SPAWN_Y
+			end
+			topY = mainPart.Position.Y + mainPart.Size.Y / 2
+		end
+	elseif terrainModel:IsA("BasePart") then
+		topY = terrainModel.Position.Y + terrainModel.Size.Y / 2
+	else
+		return HexGridConfig.Config.SPAWN_Y
+	end
+
+	return topY + HexHeightUtil.SPAWN_HEIGHT_OFFSET
 end
 
 return HexHeightUtil

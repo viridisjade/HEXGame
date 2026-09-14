@@ -22,8 +22,28 @@ local ArmyData = require(script.Parent:WaitForChild("ArmyData"))
 local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
 local ArmySpawner = require(script.Parent:WaitForChild("ArmySpawner"))
 local BuildingSystem = require(script.Parent:WaitForChild("BuildingSystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
+
+--------------------------------------------------------------------------------
+-- ArmyStatsNotifier (analog zu _G.NotifyCityStatsChanged)
+--
+-- Feuert ArmyStatsChanged an den Besitzer, wenn sich eine Army geaendert hat
+-- (Kampf, Bewegung, Runde, Einheiten hinzugefuegt/entfernt, Kampfbeginn/-ende).
+-- Aufrufbar ueber _G.NotifyArmyStatsChanged(armyId) aus jedem Server-Script.
+-- Der Client filtert selbst ob diese Army gerade ausgewaehlt ist.
+--------------------------------------------------------------------------------
+local armyStatsChangedRemote = dataRemotes:FindFirstChild("ArmyStatsChanged")
+
+_G.NotifyArmyStatsChanged = function(armyId)
+	if not armyStatsChangedRemote then return end
+	local army = ArmyData.GetArmy(armyId)
+	if not army or not army.owner then return end
+	armyStatsChangedRemote:FireClient(army.owner, armyId)
+end
 
 --------------------------------------------------------------------------------
 -- Hilfsfunktionen
@@ -65,6 +85,9 @@ onEvent("RequestClaimProvince", function(player, q, r)
 
 	if ClaimSystem.ClaimProvince(player, provinceId) then
 		print("[WorldActions] Province " .. provinceId .. " von " .. player.Name .. " geclaimt")
+		-- VICTORY: ProvinceClaimed +15 Punkte.
+		pcall(PointSystem.AwardPoints, player, "ProvinceClaimed",
+			VictoryConfig.ACTIVE_POINTS.ProvinceClaimed)
 	else
 		warn("[WorldActions] Claim fehlgeschlagen für Province " .. provinceId)
 	end
@@ -78,6 +101,8 @@ onEvent("RequestSpawnUnit", function(player, unitType, q, r)
 
 	if armyId and unitId then
 		print("[WorldActions] Unit '" .. tostring(unitType) .. "' gespawnt (Army " .. armyId .. ")")
+		-- Fog of War: neue Unit erweitert die Sicht des Besitzers.
+		pcall(FogOfWarSystem.UpdateVision, player)
 	else
 		warn("[WorldActions] Spawn fehlgeschlagen: '" .. tostring(unitType)
 			.. "' auf (" .. tostring(q) .. ", " .. tostring(r) .. ")")
@@ -106,6 +131,11 @@ onEvent("RequestBuildCamp", function(player, armyId)
 
 	if buildingId then
 		print("[WorldActions] Camp gebaut (ID: " .. buildingId .. ") von " .. player.Name)
+		-- Fog of War: ein Camp ist eine Sichtquelle (CAMP_SIGHT).
+		pcall(FogOfWarSystem.UpdateVision, player)
+		-- VICTORY: CampBuilt +25 Punkte.
+		pcall(PointSystem.AwardPoints, player, "CampBuilt",
+			VictoryConfig.ACTIVE_POINTS.CampBuilt)
 	else
 		warn("[WorldActions] Camp-Bau fehlgeschlagen: " .. tostring(reason))
 	end

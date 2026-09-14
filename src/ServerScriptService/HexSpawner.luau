@@ -27,8 +27,9 @@ local HexSpawner = {}
 local ServerStorage = game:GetService("ServerStorage")
 local HexUtils = require(script.Parent:WaitForChild("HexUtils"))
 
--- Referenz auf die Hex-Templates
-local hexTemplatesFolder = ServerStorage:WaitForChild("HexTemplates")
+-- Referenz auf die Hex-Templates (mit Timeout, damit bei fehlendem Ordner
+-- kein "Infinite yield possible" entsteht).
+local hexTemplatesFolder = ServerStorage:WaitForChild("HexTemplates", 10)
 
 -- Terrain-Namen mapping (muss mit TerrainGenerator übereinstimmen)
 local terrainTemplateNames = {
@@ -83,6 +84,11 @@ function HexSpawner.getTemplate(terrainType)
 
 	if not templateName then
 		warn("[HexSpawner] Unbekannter Terrain-Typ: " .. tostring(terrainType))
+		return nil
+	end
+
+	if not hexTemplatesFolder then
+		warn("[HexSpawner] ServerStorage > HexTemplates fehlt - es werden keine Hex-Templates erzeugt")
 		return nil
 	end
 
@@ -194,7 +200,47 @@ function HexSpawner.spawnMap(map)
 	end
 	print("[HexSpawner] Dauer: " .. elapsed .. " Sekunden")
 
+	-- Fog of War: alles standardmaessig unsichtbar ("nicht erkundet").
+	-- Sichtbare/erkundete Felder blendet der Client per FogOfWarInit ein.
+	HexSpawner.hideAllHexes()
+	print("[HexSpawner] Alle Hex-Modelle auf unsichtbar gesetzt (Fog of War).")
+
 	return count
+end
+
+--------------------------------------------------------------------------------
+-- hideAllHexes()
+-- Setzt alle gespawnten Hex-Modelle (Terrain, Soil, Gebäude, Province-Visuals,
+-- Armee-Modelle) auf Visible = false. Der Client blendet erkundete/sichtbare
+-- Felder ueber FogOfWarInit/FogOfWarUpdate wieder ein.
+--------------------------------------------------------------------------------
+function HexSpawner.hideAllHexes()
+	local hexMap = workspace:FindFirstChild("HexMap")
+	if not hexMap then return end
+
+	local function hideObject(obj)
+		if not obj then return end
+		-- WICHTIG: BaseParts haben KEIN Visible-Property! Unsichtbar bedeutet
+		-- hier Transparency = 1 (komplett transparent).
+		for _, part in ipairs(obj:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Transparency = 1
+				-- Decals/Texturen ebenfalls ausblenden.
+				for _, dec in ipairs(part:GetDescendants()) do
+					if dec:IsA("Decal") or dec:IsA("Texture") then
+						dec.Transparency = 1
+					end
+				end
+			end
+		end
+		if obj:IsA("BasePart") then
+			obj.Transparency = 1
+		end
+	end
+
+	for _, child in ipairs(hexMap:GetChildren()) do
+		hideObject(child)
+	end
 end
 
 --------------------------------------------------------------------------------

@@ -47,6 +47,14 @@
         },
         "$path": "src/StarterGui/CombatGui"
       },
+      "DiplomacyGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/DiplomacyGui"
+      },
       "EmpireOverlayGui": {
         "$className": "ScreenGui",
         "$properties": {
@@ -60,6 +68,16 @@
           "ZIndexBehavior": "Sibling"
         },
         "$path": "src/StarterGui/MovementGui"
+      },
+      "NotificationGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "IgnoreGuiInset": true,
+          "ResetOnSpawn": false,
+          "ScreenInsets": "DeviceSafeInsets",
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/NotificationGui"
       },
       "RoundTimerGui": {
         "$className": "ScreenGui",
@@ -97,6 +115,17 @@
           "ZIndexBehavior": "Sibling"
         },
         "$path": "src/StarterGui/UnitTestGui"
+      },
+      "VictoryGui": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "Enabled": false,
+          "IgnoreGuiInset": true,
+          "ResetOnSpawn": false,
+          "ScreenInsets": "DeviceSafeInsets",
+          "ZIndexBehavior": "Sibling"
+        },
+        "$path": "src/StarterGui/VictoryGui"
       },
       "$properties": {
         "ScreenOrientation": "Sensor"

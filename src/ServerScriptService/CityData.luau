@@ -230,6 +230,43 @@ function CityData.HasBuildingOnHex(cityId, q, r)
 end
 
 --------------------------------------------------------------------------------
+-- RemoveBuilding(cityId, buildingId) -> buildingType | nil
+-- Entfernt ein Gebäude aus city.buildings (z.B. bei Zerstörung). Gibt den
+-- buildingType des entfernten Eintrags zurück, damit Aufrufer z.B.
+-- Job-Slots reduzieren können.
+--------------------------------------------------------------------------------
+function CityData.RemoveBuilding(cityId, buildingId)
+	local city = cities[cityId]
+	if not city or not city.buildings then return nil end
+
+	for i, entry in ipairs(city.buildings) do
+		if entry.buildingId == buildingId then
+			local buildingType = entry.buildingType
+			table.remove(city.buildings, i)
+			return buildingType
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- GetCityByBuilding(buildingId) -> cityId | nil
+-- Findet die Stadt, zu der ein Gebäude gehört (für Zerstörung nötig).
+--------------------------------------------------------------------------------
+function CityData.GetCityByBuilding(buildingId)
+	for cityId, city in pairs(cities) do
+		if city.buildings then
+			for _, entry in ipairs(city.buildings) do
+				if entry.buildingId == buildingId then
+					return cityId
+				end
+			end
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
 -- BUILD QUEUE
 -- Es wird immer nur der erste Auftrag der Queue aktiv mit Industry versorgt.
 --------------------------------------------------------------------------------
@@ -318,6 +355,34 @@ function CityData.RemoveBuildOrder(cityId, orderId)
 		end
 	end
 	return nil
+end
+
+--------------------------------------------------------------------------------
+-- SetOwner(cityId, newOwner)
+-- Besitzerwechsel nach Stadt-Besetzung (siehe MovementSystem/CombatSystem
+-- Bürgerwehr-Belagerungs-Ablauf). Gebäude bleiben erhalten, nur der Owner
+-- und (ueber ClaimSystem separat) die Province wechseln.
+--------------------------------------------------------------------------------
+function CityData.SetOwner(cityId, newOwner)
+	local city = cities[cityId]
+	if not city then return false end
+	city.owner = newOwner
+	print("[CityData] Owner von City", cityId, "geändert zu",
+		newOwner and newOwner.Name or "niemand")
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- ClearBuildQueue(cityId)
+-- Bricht ALLE laufenden/wartenden Bauprojekte ab (Besetzung). Gebaeude
+-- selbst (city.buildings) bleiben unangetastet - nur die Warteschlange fuer
+-- NEUE Bauprojekte wird geleert.
+--------------------------------------------------------------------------------
+function CityData.ClearBuildQueue(cityId)
+	local city = cities[cityId]
+	if not city then return false end
+	city.buildQueue = {}
+	return true
 end
 
 function CityData.RemoveCity(cityId)

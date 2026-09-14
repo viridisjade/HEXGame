@@ -33,6 +33,12 @@ local CityData = require(script.Parent:WaitForChild("CityData"))
 local BuildingCostSystem = require(script.Parent:WaitForChild("BuildingCostSystem"))
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local UnitConfig = require(ReplicatedStorage:WaitForChild("UnitConfig"))
+local ArmySystem = require(script.Parent:WaitForChild("ArmySystem"))
+local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
+local TechTreeSystem = require(script.Parent:WaitForChild("TechTreeSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -60,6 +66,110 @@ local function getArmyOwner(player, armyId)
 	return army.owner == player
 end
 
+-- Diplomatie-Playerliste: alle anderen Spieler + Farbe + Beziehung.
+-- Zusaetzlich (rein additive Anzeige-Felder, keine Balance-Aenderung):
+--   allianceInfo    - eigene Allianz-Groesse/-Punkte fuer die Kopfzeile
+--                      des Diplomatie-Fensters ("Allianz: 2/3 Mitglieder",
+--                      "Allianz-Punkte: 850/1500").
+--   allianceFull    - true, wenn ein Allianzantrag an DIESEN Spieler die
+--                      Max-Mitgliederzahl ueberschreiten wuerde (Client
+--                      graut den Allianz-Button dann aus).
+local function getDiplomacyPlayers(player)
+	if not player then return {} end
+	local Players = game:GetService("Players")
+	local result = {}
+
+	local myAllianceId = PlayerData.GetAllianceId(player)
+	local maxMembers = VictoryConfig.MAX_ALLIANCE_MEMBERS
+
+	for _, other in ipairs(Players:GetPlayers()) do
+		if other ~= player then
+			local otherAllianceId = PlayerData.GetAllianceId(other)
+			-- Kombinierte Groesse, falls beide Allianzen zusammengefuehrt wuerden
+			-- (bzw. der jeweils andere Spieler beitritt). Rein additive
+			-- Vorschau, damit der Client den Button ausgrauen kann.
+			local combinedSize
+			if myAllianceId and myAllianceId == otherAllianceId then
+				combinedSize = #DiplomacySystem.GetAllianceMembers(player)
+			else
+				local mySize = myAllianceId and #DiplomacySystem.GetAllianceMembers(player) or 1
+				local otherSize = otherAllianceId and #DiplomacySystem.GetAllianceMembers(other) or 1
+				combinedSize = mySize + otherSize
+			end
+
+			result[#result + 1] = {
+				userId = other.UserId,
+				name = other.Name,
+				color = PlayerData.GetColor(other),
+				relation = DiplomacySystem.GetRelation(player, other),
+				allianceFull = combinedSize > maxMembers,
+			}
+		end
+	end
+	table.sort(result, function(a, b) return a.name < b.name end)
+	return result
+end
+
+-- Eigene Allianz-Info fuer die Kopfzeile des Diplomatie-Fensters (rein
+-- additive Anzeige, aendert keine Spielregeln).
+local function getDiplomacyAllianceInfo(player)
+	if not player then return { size = 1, maxSize = VictoryConfig.MAX_ALLIANCE_MEMBERS, points = 0 } end
+	local allianceId = PlayerData.GetAllianceId(player)
+	local size = allianceId and #DiplomacySystem.GetAllianceMembers(player) or 1
+	local points = allianceId and PointSystem.GetAlliancePoints(allianceId) or PointSystem.GetPoints(player)
+	return {
+		inAlliance = allianceId ~= nil,
+		size = size,
+		maxSize = VictoryConfig.MAX_ALLIANCE_MEMBERS,
+		points = points,
+		targetPoints = VictoryConfig.ALLIANCE_WIN_POINTS,
+	}
+end
+
+-- Kompletter Army-Snapshot in EINEM Call fuer die ArmyGui.
+-- Ersetzt das alte Muster "1x GetArmy + Nx GetUnit" (N+1 RPC-Problem).
+-- Liefert die Army inkl. aufgeloester Units (Stat-Config + aktuelle Werte).
+local function getArmyDetail(player, armyId)
+	local army = ArmyData.GetArmy(armyId)
+	if not army then return nil end
+
+	local units = {}
+	for _, unitId in ipairs(army.units or {}) do
+		local unit = UnitData.GetUnit(unitId)
+		if unit then
+			local cfg = UnitConfig.GetUnit(unit.unitType)
+			table.insert(units, {
+				id = unit.id,
+				unitType = unit.unitType,
+				name = cfg and cfg.Name or unit.unitType,
+				class = cfg and cfg.Class or "",
+				icon = cfg and cfg.Icon or "",
+				currentLP = unit.currentLP or 0,
+				maxLP = unit.maxLP or (cfg and cfg.Stats and cfg.Stats.LP) or 0,
+				attack = unit.attack or (cfg and cfg.Stats and cfg.Stats.Attack) or 0,
+				defense = unit.defense or (cfg and cfg.Stats and cfg.Stats.Defense) or 0,
+				sight = (cfg and cfg.Stats and cfg.Stats.Sight) or 0,
+				currentMovement = unit.currentMovement or 0,
+				maxMovement = unit.maxMovement or (cfg and cfg.Stats and cfg.Stats.Movement) or 0,
+				alive = unit.alive == true,
+			})
+		end
+	end
+
+	return {
+		id = army.id,
+		name = army.name,
+		q = army.q,
+		r = army.r,
+		ownerName = army.owner and army.owner.Name or nil,
+		-- Maximale Armee-Groesse (Basis 8 + Logistics-Tech-Bonus).
+		-- Der Client nutzt das fuer die dynamischen Unit-Slots.
+		maxUnits = ArmySystem.GetMaxUnits(armyId),
+		stats = army.stats,
+		units = units,
+	}
+end
+
 -- Statistiken fürs Empire-Overlay
 local function getEmpireData(player)
 	-- Spielerdaten sicherstellen (Lazy-Init wie bisher)
@@ -70,9 +180,13 @@ local function getEmpireData(player)
 	return {
 		playerName = player.Name,
 		gold = PlayerData.GetGold(player),
+		researchPerRound = TechTreeSystem.GetTotalRP(player), -- fuer das Fantasy-Overlay (rein additive Anzeige)
 		armyCount = #ArmyData.GetArmiesByOwner(player),
 		campCount = #CampData.GetCampsByOwner(player),
 		cityCount = #CityData.GetCitiesByOwner(player),
+		points = PlayerData.GetPoints(player) or 0,
+		capitalCityId = PlayerData.GetCapitalCityId(player),
+		isEliminated = PlayerData.IsEliminated(player),
 	}
 end
 
@@ -83,6 +197,36 @@ local function getCitySpawnHexes(player, cityId)
 		return {}
 	end
 	return ConstructionSystem.GetValidSpawnHexes(cityId)
+end
+
+-- Oeffentliche Stadt-Info fuer das Fantasy-Banner ueber Staedten (auch
+-- fuer FREMDE Staedte gedacht - deshalb OHNE Besitz-Pruefung wie
+-- getCitySpawnHexes). Rein additive Lese-Abfrage, aendert nichts.
+local function getCityPublicInfo(player, cityId)
+	local city = CityData.GetCity(cityId)
+	if not city then
+		return { exists = false }
+	end
+
+	local owner = city.owner
+	local buildingCount = (city.buildings and #city.buildings) or 0
+	local population = tonumber(city.population) or tonumber(city.citizenCount) or 0
+	local isCapital = owner ~= nil and PlayerData.GetCapitalCityId(owner) == city.id
+
+	return {
+		exists      = true,
+		id          = city.id,
+		name        = city.name,
+		q           = city.q,
+		r           = city.r,
+		ownerUserId = owner and owner.UserId or nil,
+		ownerName   = owner and owner.Name or "Niemand",
+		ownerColor  = owner and PlayerData.GetColor(owner) or Color3.fromRGB(140, 140, 140),
+		isMine      = (owner ~= nil and owner == player),
+		isCapital   = isCapital,
+		buildingCount = buildingCount,
+		population    = population,
+	}
 end
 
 -- Alles was auf einem Hex steht (für den WorldClickRouter)
@@ -165,6 +309,7 @@ local QUERIES = {
 
 	-- ARMEEN
 	GetArmy             = drop(ArmyData.GetArmy),
+	GetArmyDetail       = getArmyDetail,         -- Batch-Snapshot fuer die ArmyGui
 	GetArmiesByOwner    = drop(ArmyData.GetArmiesByOwner),
 	GetArmyOnHex        = drop(ArmyData.GetArmyOnHex),
 	GetArmyCount        = drop(ArmyData.GetArmyCount),
@@ -179,9 +324,12 @@ local QUERIES = {
 	GetCityOnHex        = drop(CityData.GetCityOnHex),
 	GetBuildingCosts    = drop(BuildingCostSystem.GetAllBuildingCosts),
 	GetCitySpawnHexes   = getCitySpawnHexes,     -- nur eigene Städte
+	GetCityPublicInfo   = getCityPublicInfo,     -- oeffentlich (Fantasy-Banner), ohne Besitz-Pruefung
 
 	-- SPIELER & KLICK
 	GetEmpireData       = getEmpireData,         -- mit Lazy-Init
+	GetDiplomacyPlayers = getDiplomacyPlayers,   -- fuer das Diplomatie-Fenster
+	GetDiplomacyAllianceInfo = getDiplomacyAllianceInfo, -- Allianz-Kopfzeile (additiv)
 	GetHexInfo          = getHexInfo,            -- für den WorldClickRouter
 }
 

@@ -21,6 +21,7 @@ local ArmyModelMover = require(script.Parent:WaitForChild("ArmyModelMover"))
 local CombatSystem = require(script.Parent:WaitForChild("CombatSystem"))
 local CombatData = require(script.Parent:WaitForChild("CombatData"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 -- Lazy tech access (avoids require cycles).
 local _techSystem
@@ -61,6 +62,41 @@ function MovementSystem.CanEnterHex(q, r)
 end
 
 --------------------------------------------------------------------------------
+-- GetTerrainHeight(terrainType) -> number
+--------------------------------------------------------------------------------
+-- Mappt den Terrain-String (siehe HexData.terrain, gesetzt aus
+-- TerrainGenerator.TerrainNames) auf ein Hoehenlevel:
+--   Water           -> 0  (Referenz, unbetretbar)
+--   Ebene1          -> 1
+--   Ebene2          -> 2
+--   Ebene3_Gebirge  -> 3
+--   Ebene4_Bergspitze -> 4
+--
+-- Die eigentliche Tabelle liegt jetzt zentral in HexUtils.GetTerrainHeight,
+-- damit FogOfWarSystem (Sichtlinien-Blockade) dieselbe Hoehen-Zuordnung
+-- verwendet, ohne einen zirkulaeren require (FogOfWarSystem <-> MovementSystem)
+-- zu erzeugen.
+--------------------------------------------------------------------------------
+function MovementSystem.GetTerrainHeight(terrainType)
+	return HexUtils.GetTerrainHeight(terrainType)
+end
+
+--------------------------------------------------------------------------------
+-- GetHeightMoveCost(baseCost, currentHeight, neighborHeight) -> number
+--------------------------------------------------------------------------------
+-- Gleiche Ebene: normale Kosten; +1/-1 Ebene: x1.5 (anstrengender).
+--------------------------------------------------------------------------------
+local HEIGHT_STEP_COST_MULT = 1.5
+
+function MovementSystem.GetHeightMoveCost(baseCost, currentHeight, neighborHeight)
+	if not baseCost then return nil end
+	if currentHeight == neighborHeight then
+		return baseCost
+	end
+	return baseCost * HEIGHT_STEP_COST_MULT
+end
+
+--------------------------------------------------------------------------------
 -- CalculatePath(startQ, startR, targetQ, targetR) -> path, totalCost
 --------------------------------------------------------------------------------
 function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
@@ -71,6 +107,10 @@ function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
 	local startKey = HexUtils.coordToKey(startQ, startR)
 	local targetKey = HexUtils.coordToKey(targetQ, targetR)
 
+	-- Hoehe des Start-Hexes (fuer den Hoehen-Check der ersten Bewegung).
+	local startHex = HexData.GetHex(startQ, startR)
+	local startHeight = startHex and MovementSystem.GetTerrainHeight(startHex.terrain) or 0
+
 	local openSet = {}
 	local cameFrom = {}
 	local gScore = {}
@@ -79,7 +119,7 @@ function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
 
 	gScore[startKey] = 0
 	fScore[startKey] = HexUtils.getDistance(startQ, startR, targetQ, targetR)
-	table.insert(openSet, { key = startKey, q = startQ, r = startR })
+	table.insert(openSet, { key = startKey, q = startQ, r = startR, height = startHeight })
 	inOpenSet[startKey] = true
 
 	while #openSet > 0 do
@@ -120,16 +160,24 @@ function MovementSystem.CalculatePath(startQ, startR, targetQ, targetR)
 			local moveCost = MovementSystem.GetMovementCost(n.q, n.r)
 
 			if moveCost then
-				local tentativeG = (gScore[current.key] or math.huge) + moveCost
+				-- HOEHEN-CHECK: nur max. 1 Stufe Differenz pro Schritt erlaubt.
+				local neighborHex = HexData.GetHex(n.q, n.r)
+				local neighborHeight = neighborHex and MovementSystem.GetTerrainHeight(neighborHex.terrain) or 0
+				local heightDiff = math.abs(neighborHeight - (current.height or startHeight))
 
-				if tentativeG < (gScore[nKey] or math.huge) then
-					cameFrom[nKey] = current.key
-					gScore[nKey] = tentativeG
-					fScore[nKey] = tentativeG + HexUtils.getDistance(n.q, n.r, targetQ, targetR)
+				if heightDiff <= 1 then
+					local adjustedCost = MovementSystem.GetHeightMoveCost(moveCost, current.height or startHeight, neighborHeight)
+					local tentativeG = (gScore[current.key] or math.huge) + adjustedCost
 
-					if not inOpenSet[nKey] then
-						table.insert(openSet, { key = nKey, q = n.q, r = n.r })
-						inOpenSet[nKey] = true
+					if tentativeG < (gScore[nKey] or math.huge) then
+						cameFrom[nKey] = current.key
+						gScore[nKey] = tentativeG
+						fScore[nKey] = tentativeG + HexUtils.getDistance(n.q, n.r, targetQ, targetR)
+
+						if not inOpenSet[nKey] then
+							table.insert(openSet, { key = nKey, q = n.q, r = n.r, height = neighborHeight })
+							inOpenSet[nKey] = true
+						end
 					end
 				end
 			end
@@ -162,6 +210,30 @@ function MovementSystem.GetReachableSteps(path, movementPoints)
 end
 
 --------------------------------------------------------------------------------
+-- GetEffectiveMovementPoints(armyId) -> number
+-- Bewegungspunkte inkl. TECH-Bonus (Road Building), exakt wie
+-- MoveArmyAlongPath sie fuer den tatsaechlichen Bewegungsschritt berechnet.
+-- Wird von MovementHandler benutzt, um VOR der Bewegung zu wissen, welches
+-- Hex eine Armee diese Runde wirklich erreicht (Stadt-Besetzung-Check).
+--------------------------------------------------------------------------------
+function MovementSystem.GetEffectiveMovementPoints(armyId)
+	local army = ArmyData.GetArmy(armyId)
+	if not army then return 0 end
+
+	local stats = army.stats
+	local movementPoints = stats and stats.Movement or 0
+
+	local tech = Tech()
+	if tech and army.owner and movementPoints > 0 then
+		local startHex = HexData.GetHex(army.q, army.r)
+		local onOwnLand = (startHex ~= nil and startHex.owner == army.owner)
+		movementPoints += tech.GetMovementBonus(army.owner, nil, onOwnLand)
+	end
+
+	return movementPoints
+end
+
+--------------------------------------------------------------------------------
 -- MoveArmyAlongPath(armyId, path, maxSteps, startStep) -> stepsCompleted
 --------------------------------------------------------------------------------
 function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
@@ -185,20 +257,8 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 		return 0
 	end
 
-	-- Aktuelle Bewegungspunkte dieser Runde
-	local stats = army.stats
-	local movementPoints = stats and stats.Movement or 0
-
-	----------------------------------------------------------------------
-	-- TECH: Road Building grants +1 movement while the army starts on
-	-- its own territory (hex.owner == army owner).
-	----------------------------------------------------------------------
-	local tech = Tech()
-	if tech and army.owner and movementPoints > 0 then
-		local startHex = HexData.GetHex(army.q, army.r)
-		local onOwnLand = (startHex ~= nil and startHex.owner == army.owner)
-		movementPoints += tech.GetMovementBonus(army.owner, nil, onOwnLand)
-	end
+	-- Aktuelle Bewegungspunkte dieser Runde (inkl. TECH-Bonus Road Building).
+	local movementPoints = MovementSystem.GetEffectiveMovementPoints(armyId)
 
 	local remaining = movementPoints
 	local stepsToTake = 0
@@ -302,11 +362,24 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 			-- onto the hex later (see CombatSystem.EndCombat).
 			local stopStep = endStep - 1
 			if stopStep > startStep then
-				local stopHex = path[stopStep]
-				if stopHex and ArmySystem.MoveArmy(armyId, stopHex.q, stopHex.r) then
-					ArmyModelMover.MoveModelAlongPath(armyId, path, startStep, stopStep)
+				-- FOG OF WAR: Hex für Hex bis zum letzten freien Hex vorrücken und
+				-- die Sicht nach JEDEM Schritt aktualisieren (alle Zwischen-Hexes
+				-- inkl. Sight-Radius werden aufgedeckt).
+				local stepDelay = ArmyModelMover.Config.STEP_DELAY or 0.35
+				for i = startStep + 1, stopStep do
+					local hex = path[i]
+					if hex and ArmySystem.MoveArmy(armyId, hex.q, hex.r) then
+						ArmyModelMover.MoveModelToHex(armyId, hex.q, hex.r)
+						pcall(FogOfWarSystem.UpdateVision, army.owner)
+					end
+					if i < stopStep then
+						task.wait(stepDelay)
+					end
 				end
 			end
+
+			-- Fog of War: Sicht des Besitzers final aktualisieren (Armee steht neu).
+			pcall(FogOfWarSystem.UpdateVision, army.owner)
 
 			ArmyStats.SpendMovement(armyId, spentCost)
 			MovementOrderData.CompleteOrder(armyId)
@@ -326,25 +399,32 @@ function MovementSystem.MoveArmyAlongPath(armyId, path, maxSteps, startStep)
 				.. finalHex.q .. ", " .. finalHex.r .. ") - Combat " .. tostring(combatId))
 			return 0
 		else
-			-- Frieden -> Bewegung blockiert
-			print("[MovementSystem] Ziel besetzt (Frieden) - Bewegung blockiert")
-			MovementOrderData.CompleteOrder(armyId)
-			return 0
+			-- Allianz (nicht atWar) -> Armee darf das Hex betreten und mit der
+			-- Allianz-Armee koexistieren. Kein Kampf, keine Blockade.
+			print("[MovementSystem] Ziel besetzt (Allianz) - Bewegung erlaubt")
+			-- fällt durch zur MoveArmy-Bewegung unten.
 		end
-	end
-
-	local moveSuccess = ArmySystem.MoveArmy(armyId, finalHex.q, finalHex.r)
-
-	if not moveSuccess then
-		warn("[MovementSystem] MoveArmy fehlgeschlagen für Army " .. armyId)
-		return 0
 	end
 
 	-- Bewegungspunkte VERBRAUCHEN
 	ArmyStats.SpendMovement(armyId, spentCost)
 
-	-- Model visuell bewegen (animiert) – ebenfalls mit ABSOLUTEN Indizes
-	ArmyModelMover.MoveModelAlongPath(armyId, path, startStep, endStep)
+	-- FOG OF WAR: Armee bewegt sich Hex für Hex entlang des Pfades. Die Sicht
+	-- wird NACH JEDEM einzelnen Schritt aktualisiert (nicht nur am Ziel), damit
+	-- ALLE Zwischen-Hexes inkl. Sight-Radius aufgedeckt werden.
+	local stepDelay = ArmyModelMover.Config.STEP_DELAY or 0.35
+	for i = startStep + 1, endStep do
+		local hex = path[i]
+		if not hex or not ArmySystem.MoveArmy(armyId, hex.q, hex.r) then
+			warn("[MovementSystem] MoveArmy fehlgeschlagen für Army " .. armyId .. " (Schritt " .. i .. ")")
+			return 0
+		end
+		ArmyModelMover.MoveModelToHex(armyId, hex.q, hex.r)
+		pcall(FogOfWarSystem.UpdateVision, army.owner)
+		if i < endStep then
+			task.wait(stepDelay)
+		end
+	end
 
 	-- OrderData aktualisieren (ABSOLUTER Fortschritt)
 	local order = MovementOrderData.GetOrder(armyId)

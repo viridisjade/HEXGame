@@ -122,6 +122,13 @@ function ArmyStats.Recalculate(armyId)
 		MaxMovement = minMaxMovement,
 	}
 
+	-- Army-Gui benachrichtigen (nur wenn der Besitzer die Army ausgewaehlt hat
+	-- filtert der Client selbst). Recalculate ist der Zentralpunkt fuer alle
+	-- Stat-Aenderungen, daher reicht dieser eine Hook.
+	if _G.NotifyArmyStatsChanged then
+		_G.NotifyArmyStatsChanged(armyId)
+	end
+
 	return army.stats
 end
 

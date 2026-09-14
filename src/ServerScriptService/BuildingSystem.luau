@@ -26,13 +26,25 @@ local BuildingData = require(script.Parent:WaitForChild("BuildingData"))
 local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
 local CampData = require(script.Parent:WaitForChild("CampData"))
 local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
+local CityData = require(script.Parent:WaitForChild("CityData"))
+local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
+
+-- buildingType -> Job-Typ, der beim Bau/Abriss dieses Gebäudetyps
+-- Arbeitsplätze bereitstellt (muss mit ConstructionSystem übereinstimmen).
+local JOB_TYPE_MAP = {
+	Farm = "farmer",
+	Factory = "worker",
+	Market = "trader",
+	Laboratory = "scientist",
+}
 
 --------------------------------------------------------------------------------
 -- KONFIGURATION
 --------------------------------------------------------------------------------
+-- HINWEIS: Die Spawn-Höhe kommt jetzt zentral aus HexHeightUtil.getSpawnHeight
+-- (Terrain-Oberkante + 0.5 Studs). HEIGHT_OFFSET bleibt als Kompatibilitätswert.
 BuildingSystem.Config = {
-	-- Kleiner visueller Abstand über dem Boden
-	HEIGHT_OFFSET = 0.2,
+	HEIGHT_OFFSET = HexHeightUtil.SPAWN_HEIGHT_OFFSET,
 }
 
 --------------------------------------------------------------------------------
@@ -153,22 +165,23 @@ function BuildingSystem.placeBuildingModel(buildingType, q, r)
 	local folder = BuildingSystem.getBuildingsFolder()
 	model.Parent = folder
 
+	-- Position dynamisch anhand der tatsächlichen Terrain-Höhe (Soil/Gebäude/
+	-- Hex-Modell), NICHT anhand einer festen SPAWN_Y.
 	local worldPos = HexUtils.axialToWorld(q, r)
-	local topY = HexHeightUtil.getTopY(q, r)
-	local extraY = BuildingSystem.Config.HEIGHT_OFFSET
+	local spawnY = HexHeightUtil.getSpawnHeight(q, r)
 
 	if model:IsA("Model") then
 		local bboxCf, bboxSize = model:GetBoundingBox()
 		local pivot = model:GetPivot()
 
 		local pivotToBottom = pivot.Position.Y - (bboxCf.Position.Y - bboxSize.Y / 2)
-		local targetPivotY = topY + extraY + pivotToBottom
+		local targetPivotY = spawnY + pivotToBottom
 
 		local rotation = pivot - pivot.Position
 		model:PivotTo(CFrame.new(worldPos.X, targetPivotY, worldPos.Z) * rotation)
 	elseif model:IsA("BasePart") then
 		local halfY = model.Size.Y / 2
-		model.Position = Vector3.new(worldPos.X, topY + extraY + halfY, worldPos.Z)
+		model.Position = Vector3.new(worldPos.X, spawnY + halfY, worldPos.Z)
 	end
 
 	return model
@@ -274,6 +287,20 @@ function BuildingSystem.DestroyBuilding(buildingId)
 
 	-- Aus Daten entfernen
 	BuildingData.RemoveBuilding(buildingId)
+
+	-- CityData konsistent halten: Gebäude aus city.buildings entfernen und
+	-- den zugehörigen Job-Slot abbauen. Bürger, die dadurch ohne Job
+	-- dastehen, werden arbeitslos und anschließend von AutoAssignWorkers
+	-- auf andere freie Plätze verteilt (falls vorhanden).
+	local cityId = CityData.GetCityByBuilding(buildingId)
+	if cityId then
+		local removedType = CityData.RemoveBuilding(cityId, buildingId)
+		local jobType = removedType and JOB_TYPE_MAP[removedType]
+		if jobType then
+			CityEconomySystem.RemoveJobSlot(cityId, jobType, 1)
+		end
+		CityEconomySystem.AutoAssignWorkers(cityId)
+	end
 
 	print("[BuildingSystem] Gebäude " .. buildingId .. " zerstört")
 	return true

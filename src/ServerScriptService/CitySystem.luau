@@ -19,6 +19,8 @@ local BuildingConfig = require(script.Parent:WaitForChild("BuildingConfig"))
 local ProvinceData = require(script.Parent:WaitForChild("ProvinceData"))
 local SoilGenerator = require(script.Parent:WaitForChild("SoilGenerator"))
 local HexHeightUtil = require(ReplicatedStorage:WaitForChild("HexHeightUtil"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 --------------------------------------------------------------------------------
 -- KONFIGURATION
@@ -268,8 +270,61 @@ function CitySystem.FoundCity(player, campId)
 
 	CitySystem.recolorProvinceToCityColor(provinceId, player)
 
+	-- VICTORY: Erste City eines Spielers wird automatisch zur HAUPTSTADT.
+	-- Jede City-Gründung bringt +75 Punkte.
+	pcall(PointSystem.AwardPoints, player, "CityFounded", VictoryConfig.ACTIVE_POINTS.CityFounded)
+	if not PlayerData.GetCapitalCityId(player) then
+		PlayerData.SetCapitalCityId(player, cityId)
+		CitySystem.addCapitalMarker(model, q, r, player.Name)
+		pcall(CitySystem.broadcastCapitalMarked, player, cityId, q, r)
+		print("[CitySystem] Dies ist die HAUPTSTADT von " .. player.Name)
+	end
+
 	print("[CitySystem] City gegründet: " .. CityData.GetName(cityId) .. " (ID: " .. cityId .. ") von " .. player.Name)
 	return cityId, nil
+end
+
+--------------------------------------------------------------------------------
+-- addCapitalMarker(model, q, r, playerName) - EHEMALS goldener Stern.
+--
+-- ERSETZT durch das Hauptstadt-Fantasy-Banner aus CityBannerController
+-- (client-seitig, code-generiert, Gold-Rahmen + Krone + Glow - siehe
+-- StarterPlayerScripts > CityBannerController.client.luau). Diese Funktion
+-- ist bewusst zu einem No-Op geworden (keine BillboardGui mehr), damit der
+-- alte Stern nicht mehr entsteht. Sie bleibt als Funktion erhalten, falls
+-- andere Server-Scripts sie noch aufrufen (siehe FoundCity oben) - ein
+-- Loeschen des Aufrufs war nicht noetig, da der Stern jetzt serverseitig
+-- schlicht nicht mehr erzeugt wird.
+--------------------------------------------------------------------------------
+function CitySystem.addCapitalMarker(model, q, r, playerName)
+	if not model then return end
+
+	-- Altes CapitalMarker-BillboardGui entfernen, falls es (z.B. aus einem
+	-- alten Spielstand/Studio-Test) noch existiert.
+	local oldMarker = model:FindFirstChild("CapitalMarker")
+	if oldMarker then
+		oldMarker:Destroy()
+	end
+
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- broadcastCapitalMarked(player, cityId, q, r)
+--------------------------------------------------------------------------------
+function CitySystem.broadcastCapitalMarked(player, cityId, q, r)
+	local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
+	local rem = dataRemotes and dataRemotes:FindFirstChild("CapitalCityMarked")
+	if not rem then return end
+	pcall(function()
+		rem:FireAllClients({
+			playerId = player.UserId,
+			playerName = player.Name,
+			cityId = cityId,
+			q = q,
+			r = r,
+		})
+	end)
 end
 
 --------------------------------------------------------------------------------

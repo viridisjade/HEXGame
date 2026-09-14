@@ -207,6 +207,72 @@ function CityEconomySystem.RemovePopulation(cityId, amount)
 	CityEconomySystem.AddPopulation(cityId, -num(amount))
 end
 
+--------------------------------------------------------------------------------
+-- ApplyCombatCasualties(cityId, deadCount) -> number (tatsaechlich entfernt)
+-- Nach einer gescheiterten Stadt-Verteidigung (Buergerwehr-Belagerung, siehe
+-- MovementHandler/CombatSystem): reduziert die Bevoelkerung um deadCount und
+-- gibt Job-Plaetze der Toten frei.
+--
+-- Reihenfolge:
+--   1. Zuerst arbeitslose Buerger abziehen (kein Job-Effekt).
+--   2. Danach zufaellig aus den belegten Jobs abziehen (Farmer/Worker/
+--      Trader/Scientist), damit der freie Platz spaeter von
+--      AutoAssignWorkers neu besetzt werden kann.
+-- Bevoelkerung faellt nie unter 0.
+--------------------------------------------------------------------------------
+function CityEconomySystem.ApplyCombatCasualties(cityId, deadCount)
+	local city = CityData.GetCity(cityId)
+	if not city or not deadCount or deadCount <= 0 then return 0 end
+
+	local removed = 0
+	local toRemove = math.min(deadCount, num(city.population))
+
+	-- 1) Arbeitslose zuerst.
+	local assigned = 0
+	if city.jobs then
+		for _, count in pairs(city.jobs) do
+			assigned = assigned + num(count)
+		end
+	end
+	local unemployed = math.max(0, num(city.population) - assigned)
+	local fromUnemployed = math.min(unemployed, toRemove)
+	removed = removed + fromUnemployed
+	toRemove = toRemove - fromUnemployed
+
+	-- 2) Zufaellig aus belegten Jobs (Job-Platz wird frei fuer Neuzuweisung).
+	if toRemove > 0 and city.jobs then
+		local jobTypes = { "farmer", "worker", "trader", "scientist" }
+		local guard = 0
+		while toRemove > 0 and guard < 1000 do
+			guard = guard + 1
+			-- Nur Jobtypen mit mind. 1 belegtem Platz sind Kandidaten.
+			local candidates = {}
+			for _, jobType in ipairs(jobTypes) do
+				if num(city.jobs[jobType]) > 0 then
+					table.insert(candidates, jobType)
+				end
+			end
+			if #candidates == 0 then break end
+
+			local pick = candidates[math.random(1, #candidates)]
+			city.jobs[pick] = num(city.jobs[pick]) - 1
+			removed = removed + 1
+			toRemove = toRemove - 1
+		end
+	end
+
+	city.population = math.max(0, num(city.population) - removed)
+
+	if removed > 0 then
+		CityEconomySystem.UpdateStats(cityId)
+		if _G.NotifyCityStatsChanged then _G.NotifyCityStatsChanged(cityId) end
+		print("[CityEconomy] Stadt " .. tostring(city.name) .. ": " .. removed
+			.. " Buerger durch Belagerung gestorben (Bevoelkerung jetzt " .. city.population .. ")")
+	end
+
+	return removed
+end
+
 function CityEconomySystem.GetJobWithMostWorkers(cityId)
 	local city = CityData.GetCity(cityId)
 	if not city or not city.jobs then return nil end
@@ -231,6 +297,29 @@ function CityEconomySystem.AddJobSlot(cityId, jobType, amount)
 	if not city or not city.jobSlots then return false end
 
 	city.jobSlots[jobType] = num(city.jobSlots[jobType]) + (num(amount) > 0 and num(amount) or 1)
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- RemoveJobSlot(cityId, jobType, amount)
+-- Entfernt Arbeitsplätze (z.B. wenn ein Gebäude zerstört wird). Wenn dadurch
+-- mehr Bürger im Job stehen als es Plätze gibt, werden die überzähligen
+-- Bürger arbeitslos (city.jobs wird auf city.jobSlots gekappt) - sie
+-- können danach von AutoAssignWorkers auf andere freie Plätze verteilt
+-- werden.
+--------------------------------------------------------------------------------
+function CityEconomySystem.RemoveJobSlot(cityId, jobType, amount)
+	local city = CityData.GetCity(cityId)
+	if not city or not city.jobSlots then return false end
+
+	local removeAmount = num(amount) > 0 and num(amount) or 1
+	city.jobSlots[jobType] = math.max(0, num(city.jobSlots[jobType]) - removeAmount)
+
+	-- Bürger, die jetzt über der neuen Kapazität stehen, werden arbeitslos.
+	if city.jobs and num(city.jobs[jobType]) > num(city.jobSlots[jobType]) then
+		city.jobs[jobType] = num(city.jobSlots[jobType])
+	end
+
 	return true
 end
 
@@ -276,6 +365,67 @@ function CityEconomySystem.MoveCitizen(cityId, fromJob, toJob)
 
 	if _G.NotifyCityStatsChanged then _G.NotifyCityStatsChanged(cityId) end
 	return true
+end
+
+--------------------------------------------------------------------------------
+-- AutoAssignWorkers(cityId) -> number (Anzahl neu zugewiesener Bürger)
+--------------------------------------------------------------------------------
+-- Verteilt arbeitslose Bürger (Bevölkerung - bereits zugewiesene Jobs) auf
+-- freie Arbeitsplätze, nach fester Priorität:
+--   1. Farmer (Food)  2. Worker (Industrie)  3. Trader (Gold)  4. Scientist (Forschung)
+--
+-- Überschreibt NIE eine bestehende (manuelle) Zuweisung - sie füllt nur
+-- Lücken: freie Plätze, für die arbeitslose Bürger vorhanden sind.
+-- Bleiben nach dem Auffüllen aller Plätze noch Bürger übrig, bleiben sie
+-- arbeitslos (kein Fehler).
+--
+-- Auslöser (siehe Aufrufer): Bevölkerungswachstum/-schrumpfung (ProcessGrowth),
+-- neues Gebäude (ConstructionSystem, neue Job-Slots), Gebäude-Zerstörung
+-- (BuildingSystem/ConstructionSystem, weniger Job-Slots), manuelle
+-- Job-Verschiebung (CityActions.RequestMoveCitizen).
+--------------------------------------------------------------------------------
+local JOB_PRIORITY = { "farmer", "worker", "trader", "scientist" }
+
+function CityEconomySystem.AutoAssignWorkers(cityId)
+	local city = CityData.GetCity(cityId)
+	if not city or not city.jobs or not city.jobSlots then return 0 end
+
+	-- 1) Arbeitslose Bürger zählen (Bevölkerung - bereits zugewiesene Jobs).
+	local assigned = 0
+	for _, count in pairs(city.jobs) do
+		assigned = assigned + num(count)
+	end
+
+	local unemployed = num(city.population) - assigned
+	if unemployed <= 0 then return 0 end
+
+	-- 2) Nach Priorität auffüllen: erst alle freien Farmer-Plätze, dann
+	--    Worker, dann Trader, dann Scientist.
+	local totalAssignedNow = 0
+	for _, jobType in ipairs(JOB_PRIORITY) do
+		if unemployed <= 0 then break end
+
+		local slots = num(city.jobSlots[jobType])
+		local current = num(city.jobs[jobType])
+		local freeSlots = math.max(0, slots - current)
+
+		if freeSlots > 0 then
+			local fill = math.min(freeSlots, unemployed)
+			city.jobs[jobType] = current + fill
+			unemployed = unemployed - fill
+			totalAssignedNow = totalAssignedNow + fill
+		end
+	end
+
+	-- 3) Übrige arbeitslose Bürger bleiben arbeitslos (keine Plätze frei).
+
+	if totalAssignedNow > 0 then
+		CityEconomySystem.UpdateStats(cityId)
+		if _G.NotifyCityStatsChanged then _G.NotifyCityStatsChanged(cityId) end
+		print("[CityEconomy] AutoAssignWorkers City " .. tostring(cityId) .. ": " .. totalAssignedNow .. " Bürger neu zugewiesen")
+	end
+
+	return totalAssignedNow
 end
 
 function CityEconomySystem.ProcessGrowth(cityId)
@@ -426,6 +576,14 @@ function CityEconomySystem.ProcessAllCities()
 	for cityId, _ in pairs(CityData.GetAllCities()) do
 		CityEconomySystem.ProcessRound(cityId)
 		count = count + 1
+	end
+
+	-- Nach der Runde (Wachstum/Schrumpfung ist bereits in ProcessRound
+	-- passiert): arbeitslose Bürger auf freie Plätze verteilen, für JEDE
+	-- Stadt. Muss NACH der Wachstumsberechnung laufen, damit neue Bürger
+	-- sofort einen Job bekommen können.
+	for cityId, _ in pairs(CityData.GetAllCities()) do
+		CityEconomySystem.AutoAssignWorkers(cityId)
 	end
 
 	----------------------------------------------------------------------

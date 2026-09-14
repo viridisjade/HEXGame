@@ -56,6 +56,14 @@ function PlayerData.InitPlayer(player, optionalColor)
 		cities = {},
 		cityCount = 0,
 		color = assignedColor,
+		-- Diplomatie-Zustand (siehe DiplomacyData / DiplomacySystem).
+		relations = {},       -- [otherUserId] = "Alliance"|"Neutral"|"War"
+		pendingOffers = {},   -- Liste der laufenden Angebote
+		-- Victory/Points (siehe PointSystem/VictorySystem).
+		points = 0,            -- aktuelle Sieg-Punkte
+		capitalCityId = nil,   -- Hauptstadt-City-ID (erste gegruendete City)
+		isEliminated = false,  -- Spieler ausgeschieden
+		allianceId = nil,      -- Allianz-Gruppen-ID
 	}
 
 	print("[PlayerData] Spieler initialisiert: " .. player.Name .. " (Farbe: " .. tostring(playerDataStore[player].color) .. ")")
@@ -231,6 +239,90 @@ function PlayerData.PrintStats(player)
 	print("  Provinzen: " .. data.provinceCount .. " (" .. table.concat(data.provinces, ", ") .. ")")
 	print("  Städte: " .. data.cityCount)
 	print("  Farbe: " .. tostring(data.color))
+end
+
+--------------------------------------------------------------------------------
+-- DIPLOMATIE
+--------------------------------------------------------------------------------
+function PlayerData.GetRelations(player)
+	local data = playerDataStore[player]
+	return data and data.relations or {}
+end
+
+function PlayerData.SetRelation(player, otherUserId, state)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.relations[otherUserId] = state
+end
+
+function PlayerData.GetRelation(player, otherUserId)
+	local data = playerDataStore[player]
+	if not data then return nil end
+	return data.relations[otherUserId]
+end
+
+function PlayerData.GetPendingOffers(player)
+	local data = playerDataStore[player]
+	return data and data.pendingOffers or {}
+end
+
+function PlayerData.SetPendingOffers(player, offers)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.pendingOffers = offers or {}
+end
+
+--------------------------------------------------------------------------------
+-- VICTORY / POINTS
+--------------------------------------------------------------------------------
+function PlayerData.GetPoints(player)
+	local data = playerDataStore[player]
+	return data and data.points or 0
+end
+
+function PlayerData.SetPoints(player, amount)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.points = math.max(0, amount or 0)
+end
+
+function PlayerData.AddPoints(player, amount)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.points = math.max(0, (data.points or 0) + (amount or 0))
+end
+
+function PlayerData.GetCapitalCityId(player)
+	local data = playerDataStore[player]
+	return data and data.capitalCityId or nil
+end
+
+function PlayerData.SetCapitalCityId(player, cityId)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.capitalCityId = cityId
+end
+
+function PlayerData.IsEliminated(player)
+	local data = playerDataStore[player]
+	return data and data.isEliminated or false
+end
+
+function PlayerData.SetEliminated(player, value)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.isEliminated = value == true
+end
+
+function PlayerData.GetAllianceId(player)
+	local data = playerDataStore[player]
+	return data and data.allianceId or nil
+end
+
+function PlayerData.SetAllianceId(player, allianceId)
+	local data = playerDataStore[player]
+	if not data then return end
+	data.allianceId = allianceId
 end
 
 --------------------------------------------------------------------------------

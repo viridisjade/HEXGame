@@ -188,6 +188,17 @@ print("[MapGenerator] Schritt 9: Provinz-Visualisierung wird gespawnt...")
 local totalProvinceHexes = ProvinceVisualizer.visualizeProvinces(map, provinceMap, ProvinceGenerator.getProvinceCount())
 
 --------------------------------------------------------------------------------
+-- SCHRITT 10: Fog of War - ALLE Modelle verstecken (auch Soils/Provinzen)
+--------------------------------------------------------------------------------
+-- HexSpawner.spawnMap() versteckt nur die TERRAIN-Hexes (Schritt 7). Soils
+-- (Schritt 8) und Provinzen (Schritt 9) werden erst NACH diesem Aufruf erzeugt
+-- und wären sonst standardmaessig sichtbar. Deshalb hier alles nochmal unsichtbar
+-- schalten - der Client blendet erkundete/sichtbare Felder pro Spieler wieder ein.
+print("")
+print("[MapGenerator] Schritt 10: Fog of War - alle Modelle unsichtbar schalten...")
+HexSpawner.hideAllHexes()
+
+--------------------------------------------------------------------------------
 -- FERTIG
 --------------------------------------------------------------------------------
 local totalTime = math.floor((tick() - startTime) * 100) / 100

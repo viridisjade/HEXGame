@@ -21,12 +21,18 @@ local ROOT = {
 	RoundEnd = true, SkipRound = true,
 	RequestRoute = true, ConfirmMove = true,
 	CancelMove = true,
+	-- Stadt-Besetzung mit Buergerwehr (Popup-Bestaetigung, siehe
+	-- MovementHandler): Client -> Server Antwort auf CityAttackPopup.
+	RequestAttackCity = true,
 	-- Turn based combat (client -> server)
 	CombatSelectUnit = true, CombatSelectTarget = true,
 	CombatAutoResolve = true,
 	-- Tech tree (client -> server)
 	TechAddToQueue = true, TechRemoveFromQueue = true,
 	TechReorderQueue = true,
+	-- Diplomatie (client -> server)
+	DiplomacySendOffer = true, DiplomacyRespondOffer = true,
+	DiplomacyDeclareWar = true, DiplomacyBreakAlliance = true,
 	-- NOTE: the server -> client combat events (CombatTurnStart,
 	-- CombatAutoResolveStart, ...) live in the DataRemotes folder and are
 	-- found through the fallback below - they must NOT be listed here.

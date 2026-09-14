@@ -8,11 +8,14 @@
     Record layout:
     {
         player          : Player,
-        researchedTechs : { [techId] = true },   -- finished
+        techLevels      : { [techId] = level },  -- 0 = none, 1 = Bronze, 2 = Silver, 3 = Gold
         researchQueue   : { techId, ... },       -- ORDER MATTERS (index 1 first)
-        currentProgress : { [techId] = number }, -- accumulated RP
+        currentProgress : { [techId] = number }, -- accumulated RP for the NEXT tier
         totalRPPerRound : number,                -- cached for the GUI
     }
+
+    A tech's target tier is derived from its current level at research time:
+        level 0 -> tier 1 (Bronze), level 1 -> tier 2 (Silver), level 2 -> tier 3 (Gold).
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -32,7 +35,7 @@ function TechData.Create(player)
 
 	records[player] = {
 		player = player,
-		researchedTechs = {},
+		techLevels = {},
 		researchQueue = {},
 		currentProgress = {},
 		totalRPPerRound = 0,
@@ -59,14 +62,29 @@ function TechData.ClearAll()
 end
 
 --------------------------------------------------------------------------------
--- QUEUE
+-- LEVELS
 --------------------------------------------------------------------------------
-function TechData.IsResearched(player, techId)
+-- GetLevel(player, techId) -> number (0-3)
+function TechData.GetLevel(player, techId)
 	local rec = TechData.Get(player)
-	if not rec then return false end
-	return rec.researchedTechs[techId] == true
+	if not rec then return 0 end
+	return rec.techLevels[techId] or 0
 end
 
+function TechData.SetLevel(player, techId, level)
+	local rec = TechData.Get(player)
+	if not rec then return end
+	rec.techLevels[techId] = math.clamp(tonumber(level) or 0, 0, TechConfig.MAX_LEVEL)
+end
+
+-- IsResearched: a tech counts as researched as soon as it reached tier 1+.
+function TechData.IsResearched(player, techId)
+	return TechData.GetLevel(player, techId) >= 1
+end
+
+--------------------------------------------------------------------------------
+-- QUEUE
+--------------------------------------------------------------------------------
 function TechData.IsQueued(player, techId)
 	local rec = TechData.Get(player)
 	if not rec then return false end
@@ -86,11 +104,14 @@ function TechData.QueuePosition(player, techId)
 end
 
 -- AddToQueue(player, techId) -> boolean, reason
+-- Queues the NEXT tier of a tech (the tier is derived later in ProcessResearch).
 function TechData.AddToQueue(player, techId)
 	local rec = TechData.Get(player)
 	if not rec then return false, "Keine Spielerdaten" end
 	if not TechConfig.IsValidTech(techId) then return false, "Unbekannte Technologie" end
-	if rec.researchedTechs[techId] then return false, "Bereits erforscht" end
+	if rec.techLevels[techId] and rec.techLevels[techId] >= TechConfig.MAX_LEVEL then
+		return false, "Bereits auf Gold (max)"
+	end
 	if TechData.IsQueued(player, techId) then return false, "Bereits in der Queue" end
 	if #rec.researchQueue >= MAX_QUEUE then return false, "Queue ist voll" end
 
@@ -157,7 +178,8 @@ function TechData.SetProgress(player, techId, value)
 	rec.currentProgress[techId] = math.max(0, value or 0)
 end
 
--- MarkResearched: finish a tech, drop it from the queue, clamp the progress.
+-- MarkResearched: advance the tech one tier, drop it from the queue and
+-- reset the progress so the NEXT tier starts from 0.
 function TechData.MarkResearched(player, techId)
 	local rec = TechData.Get(player)
 	if not rec then return false end
@@ -165,8 +187,9 @@ function TechData.MarkResearched(player, techId)
 	local tech = TechConfig.GetTech(techId)
 	if not tech then return false end
 
-	rec.researchedTechs[techId] = true
-	rec.currentProgress[techId] = tech.Cost
+	local nextLevel = (rec.techLevels[techId] or 0) + 1
+	rec.techLevels[techId] = math.clamp(nextLevel, 0, TechConfig.MAX_LEVEL)
+	rec.currentProgress[techId] = 0
 	TechData.RemoveFromQueue(player, techId)
 	return true
 end
@@ -194,42 +217,60 @@ function TechData.BuildClientPayload(player)
 	local spent = 0
 
 	-- Rounds left is cumulative: a tech at queue position 3 has to wait for
-	-- everything in front of it.
+	-- everything in front of it. Costs are based on the tech's TARGET tier.
 	for _, techId in ipairs(rec.researchQueue) do
 		local tech = TechConfig.GetTech(techId)
 		if tech then
+			local level = rec.techLevels[techId] or 0
+			local targetLevel = level + 1
+			local cost = TechConfig.GetLevelCost(techId, targetLevel)
 			local current = rec.currentProgress[techId] or 0
-			local remaining = math.max(0, tech.Cost - current)
+			local remaining = math.max(0, cost - current)
 			spent += remaining
 
 			progress[techId] = {
 				current = current,
-				max = tech.Cost,
+				max = cost,
+				level = level,
+				targetLevel = targetLevel,
 				roundsLeft = (rp > 0) and math.ceil(spent / rp) or -1, -- -1 = never
 			}
 		end
 	end
 
-	-- Partial progress of techs that are NOT queued right now.
+	-- Partial progress of techs that are NOT queued right now (a tier was
+	-- started but the tech was removed from the queue before it finished).
 	for techId, value in pairs(rec.currentProgress) do
-		if not progress[techId] and not rec.researchedTechs[techId] then
-			local tech = TechConfig.GetTech(techId)
-			if tech and value > 0 then
-				progress[techId] = { current = value, max = tech.Cost, roundsLeft = -1 }
+		if not progress[techId] then
+			local level = rec.techLevels[techId] or 0
+			-- Ignore already-finished (value reset to 0) or maxed techs.
+			if level < TechConfig.MAX_LEVEL and value > 0 then
+				local tech = TechConfig.GetTech(techId)
+				if tech then
+					local targetLevel = level + 1
+					local cost = TechConfig.GetLevelCost(techId, targetLevel)
+					progress[techId] = {
+						current = value,
+						max = cost,
+						level = level,
+						targetLevel = targetLevel,
+						roundsLeft = -1,
+					}
+				end
 			end
 		end
 	end
 
-	local researched = {}
-	for techId, done in pairs(rec.researchedTechs) do
-		if done then researched[techId] = true end
+	local techLevels = {}
+	for techId, level in pairs(rec.techLevels) do
+		if level > 0 then techLevels[techId] = level end
 	end
 
 	local queue = {}
 	for i, techId in ipairs(rec.researchQueue) do queue[i] = techId end
 
 	return {
-		researchedTechs = researched,
+		techLevels = techLevels,
 		researchQueue = queue,
 		currentProgress = progress,
 		totalRPPerRound = rp,

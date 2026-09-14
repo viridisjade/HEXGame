@@ -21,6 +21,7 @@ local CityData = require(script.Parent:WaitForChild("CityData"))
 local ConstructionSystem = require(script.Parent:WaitForChild("ConstructionSystem"))
 local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
 local CitySystem = require(script.Parent:WaitForChild("CitySystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -121,8 +122,49 @@ onEvent("RequestMoveCitizen", function(player, cityId, fromJob, toJob)
 
 	if success then
 		print("[CityActions] " .. player.Name .. ": " .. tostring(fromJob) .. " -> " .. tostring(toJob))
+
+		-- Nach der manuellen Verschiebung koennen an anderer Stelle noch
+		-- freie Plaetze + arbeitslose Buerger uebrig sein (z.B. wenn der
+		-- Spieler einen Farmer zu Scientist verschiebt und der frei
+		-- gewordene Farmer-Platz durch einen arbeitslosen Buerger gefuellt
+		-- werden kann). Das ueberschreibt NICHT die manuelle Wahl des
+		-- Spielers, sondern fuellt nur zusaetzliche Luecken.
+		CityEconomySystem.AutoAssignWorkers(cityId)
 	else
 		warn("[CityActions] Verschiebung fehlgeschlagen: " .. tostring(reason))
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- RequestInstantBuy
+-- Kauft das erste Item der Bau-/Rekrutierungs-Queue mit Gold sofort frei.
+--------------------------------------------------------------------------------
+onEvent("RequestInstantBuy", function(player, cityId)
+	if not isId(cityId) then return end
+
+	local success, reason = ConstructionSystem.BuyInstantComplete(cityId, player)
+
+	if success then
+		print("[CityActions] " .. player.Name .. " hat Bau-Item in Stadt " .. tostring(cityId) .. " sofort freigekauft")
+	else
+		warn("[CityActions] Sofortkauf abgelehnt: " .. tostring(reason))
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- RequestCancelBuildOrder
+-- Entfernt ein Item (aktiv oder wartend) aus der Bau-/Rekrutierungs-Queue.
+--------------------------------------------------------------------------------
+onEvent("RequestCancelBuildOrder", function(player, cityId, orderId)
+	if not isId(cityId) then return end
+	if not isNumber(orderId, 1) then return end
+
+	local success, reason = ConstructionSystem.CancelBuildOrder(cityId, player, orderId)
+
+	if success then
+		print("[CityActions] " .. player.Name .. " hat Queue-Item " .. tostring(orderId) .. " in Stadt " .. tostring(cityId) .. " entfernt")
+	else
+		warn("[CityActions] Queue-Entfernen abgelehnt: " .. tostring(reason))
 	end
 end)
 
@@ -137,6 +179,8 @@ onEvent("RequestFoundCity", function(player, campId)
 
 	if cityId then
 		print("[CityActions] City gegründet (ID: " .. cityId .. ") von " .. player.Name)
+		-- Fog of War: Eine neue Stadt ist eine Sichtquelle (CITY_SIGHT).
+		pcall(FogOfWarSystem.UpdateVision, player)
 	else
 		warn("[CityActions] City-Gründung fehlgeschlagen: " .. tostring(reason))
 	end

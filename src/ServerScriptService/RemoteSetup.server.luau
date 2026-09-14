@@ -61,10 +61,12 @@ ensure(dataRemotes, "RemoteFunction", "GetUnitStats")
 ensure(dataRemotes, "RemoteFunction", "GetUnitConfig")
 
 ensure(dataRemotes, "RemoteFunction", "GetArmy")
+ensure(dataRemotes, "RemoteFunction", "GetArmyDetail")
 ensure(dataRemotes, "RemoteFunction", "GetArmiesByOwner")
 ensure(dataRemotes, "RemoteFunction", "GetArmyOnHex")
 ensure(dataRemotes, "RemoteFunction", "GetArmyCount")
 ensure(dataRemotes, "RemoteFunction", "GetArmyOwner")
+ensure(dataRemotes, "RemoteEvent", "ArmyStatsChanged")
 
 ensure(dataRemotes, "RemoteFunction", "GetCamp")
 ensure(dataRemotes, "RemoteFunction", "GetCampOnHex")
@@ -73,6 +75,7 @@ ensure(dataRemotes, "RemoteFunction", "GetCity")
 ensure(dataRemotes, "RemoteFunction", "GetCityOnHex")
 ensure(dataRemotes, "RemoteFunction", "GetBuildingCosts")
 ensure(dataRemotes, "RemoteFunction", "GetCitySpawnHexes")
+ensure(dataRemotes, "RemoteFunction", "GetCityPublicInfo")
 
 ensure(dataRemotes, "RemoteFunction", "GetEmpireData")
 ensure(dataRemotes, "RemoteFunction", "GetRoundData")
@@ -91,6 +94,8 @@ ensure(dataRemotes, "RemoteEvent", "RequestFoundCity")
 ensure(dataRemotes, "RemoteEvent", "RequestPlaceBuilding")
 ensure(dataRemotes, "RemoteEvent", "RequestRecruitUnit")
 ensure(dataRemotes, "RemoteEvent", "RequestMoveCitizen")
+ensure(dataRemotes, "RemoteEvent", "RequestInstantBuy")
+ensure(dataRemotes, "RemoteEvent", "RequestCancelBuildOrder")
 ensure(dataRemotes, "RemoteEvent", "RequestBuildCamp")
 ensure(dataRemotes, "RemoteEvent", "CityStatsChanged")
 
@@ -109,11 +114,36 @@ ensure(dataRemotes, "RemoteEvent", "TechTreeUpdate")
 ensure(dataRemotes, "RemoteEvent", "TechResearched")
 ensure(dataRemotes, "RemoteFunction", "GetTechState")
 
+-- Diplomatie: server -> client push + state query
+ensure(dataRemotes, "RemoteEvent", "DiplomacyUpdate")
+ensure(dataRemotes, "RemoteEvent", "DiplomacyNotification")
+ensure(dataRemotes, "RemoteFunction", "GetDiplomacyState")
+ensure(dataRemotes, "RemoteFunction", "GetDiplomacyPlayers")
+ensure(dataRemotes, "RemoteFunction", "GetDiplomacyAllianceInfo")
+
+-- Fog of War: server -> client push (Init = voller State beim Join, Update = Delta)
+ensure(dataRemotes, "RemoteEvent", "FogOfWarInit")
+ensure(dataRemotes, "RemoteEvent", "FogOfWarUpdate")
+
+-- Victory system: server -> client push
+ensure(dataRemotes, "RemoteEvent", "PointsUpdate")
+ensure(dataRemotes, "RemoteEvent", "VictoryAchieved")
+ensure(dataRemotes, "RemoteEvent", "PlayerEliminated")
+ensure(dataRemotes, "RemoteEvent", "CapitalCityMarked")
+
 ensure(ReplicatedStorage, "RemoteEvent", "RoundEnd")
 ensure(ReplicatedStorage, "RemoteEvent", "SkipRound")
 ensure(ReplicatedStorage, "RemoteFunction", "RequestRoute")
 ensure(ReplicatedStorage, "RemoteEvent", "ConfirmMove")
 ensure(ReplicatedStorage, "RemoteEvent", "CancelMove")
+
+-- Stadt-Besetzung mit Buergerwehr: Client -> Server Antwort auf das
+-- Angriffs-Popup (root level, mirrored in Net.ROOT), Server -> Client
+-- Popup-Anfrage + Kampf-Ergebnis (DataRemotes, ueber Net-Fallback gefunden).
+ensure(ReplicatedStorage, "RemoteEvent", "RequestAttackCity")
+ensure(dataRemotes, "RemoteEvent", "CityAttackPopup")
+ensure(dataRemotes, "RemoteEvent", "CityAttackResult")
+
 
 -- Turn based combat input (root level, mirrored in Net.ROOT)
 ensure(ReplicatedStorage, "RemoteEvent", "CombatSelectUnit")
@@ -124,6 +154,12 @@ ensure(ReplicatedStorage, "RemoteEvent", "CombatAutoResolve")
 ensure(ReplicatedStorage, "RemoteEvent", "TechAddToQueue")
 ensure(ReplicatedStorage, "RemoteEvent", "TechRemoveFromQueue")
 ensure(ReplicatedStorage, "RemoteEvent", "TechReorderQueue")
+
+-- Diplomatie input (root level, mirrored in Net.ROOT)
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacySendOffer")
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacyRespondOffer")
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacyDeclareWar")
+ensure(ReplicatedStorage, "RemoteEvent", "DiplomacyBreakAlliance")
 
 local totalRF = 0
 local totalRE = 0

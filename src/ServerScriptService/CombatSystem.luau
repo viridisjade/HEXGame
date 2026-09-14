@@ -52,6 +52,13 @@ local ArmyModelMover = require(script.Parent:WaitForChild("ArmyModelMover"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
 local CityData = require(script.Parent:WaitForChild("CityData"))
+local CampData = require(script.Parent:WaitForChild("CampData"))
+local CityEconomySystem = require(script.Parent:WaitForChild("CityEconomySystem"))
+local ClaimSystem = require(script.Parent:WaitForChild("ClaimSystem"))
+local FogOfWarSystem = require(script.Parent:WaitForChild("FogOfWarSystem"))
+local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
+local VictorySystem = require(script.Parent:WaitForChild("VictorySystem"))
+local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
 
 -- Combat rule (was UnitConfig.MAX_DEFENSE_PERCENT): absorption is capped at 70%.
 local MAX_DEFENSE_PERCENT = 70
@@ -446,9 +453,15 @@ function CombatSystem.NextTurn(combat)
 end
 
 --------------------------------------------------------------------------------
--- StartCombat(attackerArmyId, defenderArmyId, q, r) -> combatId?, reason?
+-- StartCombat(attackerArmyId, defenderArmyId, q, r, siegeInfo?) -> combatId?, reason?
+--
+-- siegeInfo (optional): { cityId, campId, hexQ, hexR, initialCitizens }.
+-- Set by MovementHandler.RequestAttackCity when the defenderArmyId belongs
+-- to a temporary Citizen-Militia army defending a besieged city/camp.
+-- CombatSystem.EndCombat() checks this field to trigger the occupation
+-- logic (owner change, citizen losses, build queue wipe, siege points).
 --------------------------------------------------------------------------------
-function CombatSystem.StartCombat(attackerArmyId, defenderArmyId, q, r)
+function CombatSystem.StartCombat(attackerArmyId, defenderArmyId, q, r, siegeInfo)
 	local attackerArmy = ArmyData.GetArmy(attackerArmyId)
 	local defenderArmy = ArmyData.GetArmy(defenderArmyId)
 
@@ -458,10 +471,13 @@ function CombatSystem.StartCombat(attackerArmyId, defenderArmyId, q, r)
 
 	local isWildlife = (defenderArmy.owner == nil)
 
-	-- Allies never fight each other.
-	if not isWildlife and type(DiplomacySystem.AreAllied) == "function"
-		and DiplomacySystem.AreAllied(attackerArmy.owner, defenderArmy.owner) then
-		return nil, "Verbuendete - kein Angriff"
+	-- Allianz-Mitglieder kaempfen nie gegeneinander. (Diplomacy: AreInAlliance
+	-- gilt nur fuer "Alliance"; "Neutral"/"War" duerfen kaempfen. Wildlife
+	-- (owner == nil) ist nie Allianz-Mitglied.)
+	if not isWildlife and type(DiplomacySystem.AreInAlliance) == "function"
+		and attackerArmy.owner and defenderArmy.owner
+		and DiplomacySystem.AreInAlliance(attackerArmy.owner, defenderArmy.owner) then
+		return nil, "Allianz - kein Angriff"
 	end
 
 	-- Guard: never stack two combats on the same hex or army.
@@ -492,6 +508,7 @@ function CombatSystem.StartCombat(attackerArmyId, defenderArmyId, q, r)
 		isWildlife = isWildlife,
 		wildlifeScale = wildlifeScale,
 		phase = Phase.PENDING,
+		siegeInfo = siegeInfo,
 	})
 
 	if #combat.attackerUnits == 0 or #combat.defenderUnits == 0 then
@@ -843,6 +860,9 @@ end
 --------------------------------------------------------------------------------
 function CombatSystem.CheckRoute(combat, side)
 	if combat.isWildlife and side == "defender" then return false end
+	-- Citizen-Militia (Buergerwehr, Movement = 0) kann sich nicht bewegen und
+	-- daher auch nicht fliehen/routen - sie verteidigt bis zum letzten Mann.
+	if combat.siegeInfo and side == "defender" then return false end
 
 	local morale = combat.morale[side]
 	if morale >= UnitConfig.MORALE_ROUT_THRESHOLD then return false end
@@ -1080,6 +1100,152 @@ function CombatSystem.CheckVictory(combat)
 end
 
 --------------------------------------------------------------------------------
+-- ResolveCitySiege(combat, winnerSide, byFlight, hexQ, hexR, preWipeSnapshot)
+--
+-- Called from EndCombat() whenever combat.siegeInfo is set (the defender was
+-- a temporary Citizen-Militia army defending a besieged city/camp, see
+-- MovementHandler.RequestAttackCity). Implements Teil 4 of the Stadt-
+-- Besetzung Aufgabe:
+--   STADT GEWINNT   (Militia hat Ueberlebende) -> +25 Verteidiger, kein
+--                     Besitzerwechsel.
+--   ARMEE GEWINNT   (Militia komplett tot)      -> Owner-Wechsel (Stadt +
+--                     Province), Bau-Queue leeren, +100/-100 Punkte,
+--                     Hauptstadt-Check -> Elimination.
+--   BEIDE TOT       (Draw, Militia UND Angreifer tot) -> keine Punkte.
+-- Buerger-Verluste (tote Militia -> tote Buerger) laufen in JEDEM Fall.
+-- Die Militia-Armee ist immer nur temporaer und wird am Ende immer geloescht.
+--------------------------------------------------------------------------------
+function CombatSystem.ResolveCitySiege(combat, winnerSide, byFlight, hexQ, hexR, preWipeSnapshot)
+	local siege = combat.siegeInfo
+	if not siege then return end
+
+	local attackerOwner = combat.attackerOwner
+	local defenderOwner = combat.defenderOwner -- Stadt/Camp-Besitzer (Militia-Owner)
+	local militiaArmyId = combat.defenderArmyId
+	local cityId = siege.cityId
+	local campId = siege.campId
+
+	-- 1) Buerger-Verluste: tote Militia-Units -> Buerger sterben permanent.
+	--    Muss aus dem VOR dem generischen Wipe erstellten Snapshot gelesen
+	--    werden, weil EndCombat() bei einem Angreifer-Sieg bereits ALLE
+	--    Militia-Units aus UnitData entfernt hat (alive-Flag waere weg).
+	local deadMilitia = 0
+	local aliveMilitia = 0
+	for _, unitEntry in ipairs(preWipeSnapshot.defender.units) do
+		if unitEntry.alive then
+			aliveMilitia += 1
+		else
+			deadMilitia += 1
+		end
+	end
+
+	if deadMilitia > 0 then
+		if cityId then
+			pcall(CityEconomySystem.ApplyCombatCasualties, cityId, deadMilitia)
+		elseif campId then
+			pcall(CampData.RemoveCitizens, campId, deadMilitia)
+		end
+		CombatState.AddLog(combat, ("%d Buerger sind bei der Verteidigung gefallen")
+			:format(deadMilitia))
+	end
+
+	-- 2) Militia-Armee existiert nur temporaer - IMMER vollstaendig entfernen
+	--    (ueberlebende Units werden NICHT weiterverwendet, sie sind ja schon
+	--    als "zurueck zu Buergern" gezaehlt).
+	local militiaArmy = ArmyData.GetArmy(militiaArmyId)
+	if militiaArmy then
+		for _, unitId in ipairs(militiaArmy.units or {}) do
+			UnitData.RemoveUnit(unitId)
+		end
+		militiaArmy.units = {}
+	end
+	pcall(ArmySystem.DeleteArmy, militiaArmyId)
+
+	-- 3) Ergebnis-abhaengige Effekte.
+	if winnerSide == "attacker" and not byFlight then
+		----------------------------------------------------------------
+		-- ARMEE GEWINNT (Militia komplett vernichtet).
+		----------------------------------------------------------------
+		if cityId then
+			local city = CityData.GetCity(cityId)
+			if city then
+				CityData.ClearBuildQueue(cityId)
+
+				local wasCapital = defenderOwner
+					and PlayerData.GetCapitalCityId(defenderOwner) == cityId
+
+				if wasCapital and defenderOwner then
+					-- HAUPTSTADT erobert -> Eliminierung (wie beim normalen
+					-- CityConquered-Pfad neutralisiert EliminatePlayer alle
+					-- Staedte/Camps des Verlierers, inkl. dieser Hauptstadt).
+					-- EliminatePlayer setzt city.owner NUR auf nil (neutral) -
+					-- die Stadt (inkl. Province) muss danach explizit an den
+					-- Eroberer uebertragen werden, sonst bleibt sie besitzlos.
+					pcall(VictorySystem.EliminatePlayer, defenderOwner, attackerOwner,
+						"Hauptstadt erobert")
+					if attackerOwner then
+						CityData.SetOwner(cityId, attackerOwner)
+						if city.provinceId then
+							pcall(ClaimSystem.ClaimProvince, attackerOwner, city.provinceId)
+						end
+					end
+				else
+					CityData.SetOwner(cityId, attackerOwner)
+					if city.provinceId and defenderOwner and attackerOwner then
+						pcall(ClaimSystem.TransferProvince, defenderOwner, attackerOwner,
+							city.provinceId)
+					end
+				end
+
+				if _G.NotifyCityStatsChanged then
+					_G.NotifyCityStatsChanged(cityId)
+				end
+			end
+		elseif campId then
+			local camp = CampData.GetCamp(campId)
+			if camp then
+				CampData.SetOwner(campId, attackerOwner)
+				if camp.provinceId and defenderOwner and attackerOwner then
+					pcall(ClaimSystem.TransferProvince, defenderOwner, attackerOwner,
+						camp.provinceId)
+				end
+			end
+		end
+
+		if attackerOwner then
+			pcall(PointSystem.AwardPoints, attackerOwner, "CitySiegeWon",
+				VictoryConfig.ACTIVE_POINTS.CitySiegeWon)
+		end
+		if defenderOwner then
+			pcall(PointSystem.DeductPoints, defenderOwner, "CitySiegeLost",
+				VictoryConfig.LOSS_POINTS.CitySiegeLost)
+		end
+
+		-- Fog of War: Stadt/Camp ist jetzt eine Sichtquelle des neuen
+		-- Besitzers (EndCombat hat UpdateVision bereits VOR diesem
+		-- Besitzerwechsel aufgerufen) - beide Seiten neu berechnen.
+		if attackerOwner then pcall(FogOfWarSystem.UpdateVision, attackerOwner) end
+		if defenderOwner then pcall(FogOfWarSystem.UpdateVision, defenderOwner) end
+
+		pcall(VictorySystem.CheckVictory)
+
+	elseif winnerSide == "defender" then
+		if aliveMilitia > 0 or byFlight then
+			----------------------------------------------------------------
+			-- STADT GEWINNT: Militia (oder ein Teil davon) hat ueberlebt,
+			-- oder der Angreifer ist geflohen - erfolgreiche Verteidigung.
+			----------------------------------------------------------------
+			if defenderOwner then
+				pcall(PointSystem.AwardPoints, defenderOwner, "CityDefended",
+					VictoryConfig.ACTIVE_POINTS.CityDefended)
+			end
+		end
+		-- BEIDE TOT (aliveMilitia == 0, nicht geflohen): keine Punkte-Aenderung,
+		-- Stadt bleibt beim Verteidiger (ohnehin unveraendert).
+	end
+end
+
+--------------------------------------------------------------------------------
 -- ApplyPostCombat(combat, winnerSide) - heal scales with the winner's morale
 --------------------------------------------------------------------------------
 function CombatSystem.ApplyPostCombat(combat, winnerSide)
@@ -1150,8 +1316,21 @@ function CombatSystem.EndCombat(combat, winnerSide, byFlight)
 	snapshot.winner = winnerSide
 	snapshot.byFlight = byFlight or false
 
+	-- Stadt-Besetzung: Buerger-Verluste muessen aus dem alive-Zustand VOR dem
+	-- generischen Loser-Wipe unten gelesen werden (der Wipe entfernt die
+	-- Militia-Units komplett aus UnitData - danach waere "wer ist tot"
+	-- nicht mehr rekonstruierbar).
+	local preSiegeSnapshot = combat.siegeInfo and snapshot or nil
+
+	-- Bei einer Stadt-Belagerung ist die Militia (immer "defender") niemals
+	-- ueber den normalen Wipe-Pfad zu entfernen: ResolveCitySiege() weiter
+	-- unten uebernimmt ihr komplettes Aufraeumen (inkl. Buerger-Verlusten).
+	-- Verliert stattdessen die Militia NICHT (winnerSide == "defender"), ist
+	-- der Loser die ganz normale Angreifer-Armee - die wird wie gewohnt gewipt.
+	local skipStandardWipe = combat.siegeInfo and loserSide == "defender"
+
 	local ok, err = pcall(function()
-		if not byFlight then
+		if not byFlight and not skipStandardWipe then
 			-- Wipe out the defeated army (units + model + hex marker).
 			local loser = ArmyData.GetArmy(loserArmyId)
 			if loser then
@@ -1191,9 +1370,100 @@ function CombatSystem.EndCombat(combat, winnerSide, byFlight)
 			end
 		end
 	end
-	if ArmyData.GetArmy(winnerArmyId) then
+	-- Bei einer Stadt-Belagerung darf die Buergerwehr NIEMALS ein sichtbares
+	-- 3D-Model bekommen - auch nicht kurzzeitig, wenn sie den Kampf gewinnt
+	-- (winnerArmyId waere dann die Militia-Armee, die ResolveCitySiege weiter
+	-- unten ohnehin sofort loescht).
+	if ArmyData.GetArmy(winnerArmyId) and not (combat.siegeInfo and winnerSide == "defender") then
 		ArmySpawner.RefreshArmyModel(winnerArmyId)
 	end
+
+	-- Fog of War: Nach einem Kampf koennen Units gestorben sein -> Sicht beider
+	-- Beteiligten neu berechnen (weniger Sicht, Gebaeude bleiben als Quelle).
+	if combat.attackerOwner then pcall(FogOfWarSystem.UpdateVision, combat.attackerOwner) end
+	if combat.defenderOwner then pcall(FogOfWarSystem.UpdateVision, combat.defenderOwner) end
+
+	-- VICTORY: Punkte + City-Eroberung + Hauptstadt-Eliminierung.
+	--
+	-- Stadt-Besetzung mit Buergerwehr (combat.siegeInfo gesetzt): komplett
+	-- eigener Pfad ueber ResolveCitySiege() - der generische
+	-- ArmyDefeated/CityConquered-Pfad darunter wuerde sonst doppelte Punkte
+	-- vergeben (der Verteidiger IST hier schon die "Stadt", kein normaler
+	-- Feind-Armee-Kampf).
+	pcall(function()
+		if combat.siegeInfo then
+			-- ResolveCitySiege laeuft IMMER (auch bei byFlight = Angreifer
+			-- geflohen): Buerger-Verluste der Militia und die Verteidigungs-
+			-- Punkte muessen auch dann verarbeitet werden. Die Militia selbst
+			-- kann laut CheckRoute/ProcessFlee-Guard oben nie selbst fliehen,
+			-- byFlight bedeutet hier also immer "Angreifer ist geroutet".
+			CombatSystem.ResolveCitySiege(combat, winnerSide, byFlight, hexQ, hexR, preSiegeSnapshot)
+			return
+		end
+
+		if not byFlight then
+			local winnerOwner = ownerOf(combat, winnerSide)
+			local loserOwner = ownerOf(combat, loserSide)
+
+			if winnerOwner then
+				-- Besiegte feindliche Armee (+25), nur wenn der Verlierer ein
+				-- Spieler ist (kein Wildtier).
+				if loserOwner and loserOwner ~= winnerOwner then
+					pcall(PointSystem.AwardPoints, winnerOwner, "ArmyDefeated",
+						VictoryConfig.ACTIVE_POINTS.ArmyDefeated)
+				end
+
+				-- City-Eroberung: nur wenn der Angreifer das Hex einnimmt.
+				if winnerSide == "attacker" and loserOwner then
+					local city = CityData.GetCityOnHex(hexQ, hexR)
+					if city and city.owner == loserOwner then
+						if PlayerData.GetCapitalCityId(loserOwner) == city.id then
+							-- HAUPTSTADT erobert -> Eliminierung des Besitzers.
+							-- EliminatePlayer uebertraegt NICHT automatisch an den
+							-- Eroberer (es neutralisiert nur), darum die Stadt
+							-- (inkl. Province) danach explizit dem Eroberer geben.
+							pcall(VictorySystem.EliminatePlayer, loserOwner, winnerOwner,
+								"Hauptstadt erobert")
+							CityData.SetOwner(city.id, winnerOwner)
+							if city.provinceId then
+								pcall(ClaimSystem.ClaimProvince, winnerOwner, city.provinceId)
+							end
+						else
+							pcall(PointSystem.AwardPoints, winnerOwner, "CityConquered",
+								VictoryConfig.ACTIVE_POINTS.CityConquered)
+							pcall(PointSystem.DeductPoints, loserOwner, "CityLost",
+								VictoryConfig.LOSS_POINTS.CityLost)
+							-- Stadt (Owner + Bau-Queue) an den Eroberer uebertragen.
+							CityData.SetOwner(city.id, winnerOwner)
+							CityData.ClearBuildQueue(city.id)
+							-- Province mit uebertragen, sonst bleibt sie neutral/
+							-- beim alten Besitzer, obwohl die Stadt schon dem
+							-- neuen Besitzer gehoert.
+							if city.provinceId then
+								pcall(ClaimSystem.TransferProvince, loserOwner, winnerOwner,
+									city.provinceId)
+							end
+						end
+
+						-- Client-Caches (CityGui etc.) informieren, sonst denkt
+						-- der Client noch, der alte Besitzer haette die Stadt.
+						if _G.NotifyCityStatsChanged then
+							_G.NotifyCityStatsChanged(city.id)
+						end
+
+						-- Fog of War: Die Stadt ist jetzt eine Sichtquelle des
+						-- NEUEN Besitzers, nicht mehr des alten - beide Seiten
+						-- neu berechnen (oben lief UpdateVision noch VOR dem
+						-- Owner-Wechsel).
+						pcall(FogOfWarSystem.UpdateVision, winnerOwner)
+						pcall(FogOfWarSystem.UpdateVision, loserOwner)
+					end
+				end
+			end
+
+			pcall(VictorySystem.CheckVictory)
+		end
+	end)
 
 	print(("[CombatSystem] Kampf %d beendet - Sieger: %s%s")
 		:format(combat.id, tostring(winnerSide), byFlight and " (Flucht)" or ""))
@@ -1251,6 +1521,9 @@ function CombatSystem.ProcessFlee(combatId, side)
 	end
 	if combat.isWildlife and side == "defender" then
 		return false, "Wildtiere fliehen nicht"
+	end
+	if combat.siegeInfo and side == "defender" then
+		return false, "Buergerwehr kann nicht fliehen"
 	end
 	CombatSystem.RouteArmy(combat, side)
 	return true, nil
