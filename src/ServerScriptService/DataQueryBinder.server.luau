@@ -39,6 +39,10 @@ local DiplomacySystem = require(script.Parent:WaitForChild("DiplomacySystem"))
 local TechTreeSystem = require(script.Parent:WaitForChild("TechTreeSystem"))
 local PointSystem = require(script.Parent:WaitForChild("PointSystem"))
 local VictoryConfig = require(ReplicatedStorage:WaitForChild("VictoryConfig"))
+-- Spielerfarben: liegen SERVERSEITIG (der Client kann dieses Modul nicht
+-- lesen) - die Banner-Farbe muss also ueber GetCityPublicInfo ausgeliefert
+-- werden. Siehe resolveOwnerColor() unten.
+local PlayerColorConfig = require(script.Parent:WaitForChild("PlayerColorConfig"))
 
 local dataRemotes = ReplicatedStorage:WaitForChild("DataRemotes", 30)
 
@@ -199,6 +203,73 @@ local function getCitySpawnHexes(player, cityId)
 	return ConstructionSystem.GetValidSpawnHexes(cityId)
 end
 
+-- NEUTRALE Farbe fuer besitzlose Staedte (city.owner == nil, z.B. nachdem
+-- VictorySystem.EliminatePlayer den Besitzer eliminiert hat). Das ist der
+-- EINZIGE Fall, in dem ein Banner grau sein darf.
+local NEUTRAL_CITY_COLOR = Color3.fromRGB(128, 128, 128)
+
+-- Die von PlayerData.GetColor() zurueckgegebene "keine Daten"-Fallback-Farbe.
+local PLAYERDATA_FALLBACK_COLOR = Color3.fromRGB(128, 128, 128)
+
+--------------------------------------------------------------------------------
+-- resolveOwnerColor(owner) -> Color3
+-- Liefert die ECHTE Spielerfarbe des Stadt-Besitzers.
+--
+-- BANNER-FARBE-BUG (Fix 3): PlayerData.GetColor() gibt fuer einen Spieler
+-- OHNE Daten-Record nicht nil zurueck, sondern ein neutrales Grau
+-- (128,128,128). GetCityPublicInfo hat das ungeprueft als ownerColor
+-- ausgeliefert -> das Banner war grau statt rot/blau/gruen, obwohl die
+-- Farbe in PlayerColorConfig laengst vergeben war. Das passiert z.B. direkt
+-- nach einer Eroberung, wenn der neue Besitzer noch keinen (oder keinen
+-- mehr) PlayerData-Record hat, oder wenn PlayerData.RemovePlayer beim
+-- Verlassen gelaufen ist.
+--
+-- Reihenfolge jetzt:
+--   1. PlayerData-Record (bei Bedarf Lazy-Init, wie in getEmpireData)
+--   2. PlayerColorConfig.GetColor (die tatsaechlich vergebene Farbe)
+--   3. PlayerColorConfig.AssignColor (Farbe neu vergeben - Spieler ist ja da)
+--   4. Neutralgrau NUR wenn es gar keinen Besitzer gibt
+--------------------------------------------------------------------------------
+local function resolveOwnerColor(owner)
+	if not owner then
+		return NEUTRAL_CITY_COLOR
+	end
+
+	-- 1) PlayerData sicherstellen (Lazy-Init, analog zu getEmpireData).
+	--    owner.Parent == nil -> der Spieler hat das Spiel verlassen, dann
+	--    darf KEIN neuer Daten-Record angelegt werden (sonst leak + eine
+	--    Farbindex-Belegung fuer jemanden, der gar nicht mehr da ist).
+	local stillInGame = owner.Parent ~= nil
+	if stillInGame and not PlayerData.GetPlayerData(owner) then
+		pcall(PlayerData.InitPlayer, owner)
+	end
+
+	local color = PlayerData.GetColor(owner)
+	if color and color ~= PLAYERDATA_FALLBACK_COLOR then
+		return color
+	end
+
+	-- 2) Direkt aus der Farbverwaltung lesen.
+	local configColor = PlayerColorConfig.GetColor(owner)
+	if configColor then
+		-- PlayerData auf denselben Stand bringen, damit alle Systeme
+		-- (Provinz-Farben, Banner, Empire-Overlay) dieselbe Farbe zeigen.
+		pcall(PlayerData.SetColor, owner, configColor)
+		return configColor
+	end
+
+	-- 3) Spieler ist online, hat aber noch gar keine Farbe -> vergeben.
+	if stillInGame then
+		local ok, assigned = pcall(PlayerColorConfig.AssignColor, owner)
+		if ok and assigned then
+			pcall(PlayerData.SetColor, owner, assigned)
+			return assigned
+		end
+	end
+
+	return NEUTRAL_CITY_COLOR
+end
+
 -- Oeffentliche Stadt-Info fuer das Fantasy-Banner ueber Staedten (auch
 -- fuer FREMDE Staedte gedacht - deshalb OHNE Besitz-Pruefung wie
 -- getCitySpawnHexes). Rein additive Lese-Abfrage, aendert nichts.
@@ -221,7 +292,8 @@ local function getCityPublicInfo(player, cityId)
 		r           = city.r,
 		ownerUserId = owner and owner.UserId or nil,
 		ownerName   = owner and owner.Name or "Niemand",
-		ownerColor  = owner and PlayerData.GetColor(owner) or Color3.fromRGB(140, 140, 140),
+		-- ECHTE Spielerfarbe (siehe resolveOwnerColor) - nie mehr zufaellig grau.
+		ownerColor  = resolveOwnerColor(owner),
 		isMine      = (owner ~= nil and owner == player),
 		isCapital   = isCapital,
 		buildingCount = buildingCount,

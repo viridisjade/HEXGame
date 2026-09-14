@@ -67,6 +67,13 @@ local function cleanupPlayer(player)
 		for _, city in ipairs(cities) do
 			CityData.SetOwner(city.id, nil)
 			stats.cities = stats.cities + 1
+
+			-- BANNER-FIX: Besitzerwechsel muessen zum Client, sonst leuchten
+			-- die City-Banner (CityBannerController) in der Farbe des
+			-- Spielers weiter, der gar nicht mehr im Spiel ist.
+			if _G.NotifyCityStatsChanged then
+				_G.NotifyCityStatsChanged(city.id)
+			end
 		end
 	end
 

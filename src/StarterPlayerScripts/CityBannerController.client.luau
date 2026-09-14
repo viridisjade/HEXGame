@@ -24,6 +24,33 @@
         explored   -> alle Elemente Transparency 0.5 (Geister-Look)
         visible    -> Rahmen/Text voll sichtbar (0), Innenfläche bleibt bei 0.2
 
+    BANNER-GARANTIEN (Fix "City-Banner nicht sichtbar"):
+        1. GENAU EIN Banner pro City-Gebaeude. Vor UND nach dem Erzeugen
+           wird aufgeraeumt (destroyStrayBanners/enforceSingleBanner),
+           zusaetzlich gibt es einen periodischen Dedupe-Sweep.
+        2. Der Banner-Text ist IMMER der Stadtname aus CityData - der
+           Platzhalter "..." bleibt niemals dauerhaft stehen (Retries +
+           Heal-Loop, siehe refreshBannerData).
+        3. Die Banner-Farbe ist IMMER die Spielerfarbe des Besitzers
+           (kommt vom Server via GetCityPublicInfo.ownerColor, denn
+           PlayerColorConfig liegt in ServerScriptService und ist fuer
+           den Client nicht erreichbar). Grau gibt es NUR noch fuer
+           besitzlose Staedte (eliminierte Spieler).
+        4. Enabled = false ist NUR der Fog-Zustand "unexplored". Eigene
+           Staedte sind immer sichtbar (eine eigene Stadt ist selbst eine
+           Sichtquelle), und fehlt die Fog-Quelle komplett (FogOfWar-
+           Controller laedt noch/fehlt), wird das Banner NICHT dauerhaft
+           versteckt (Fail-Open + Heal-Loop).
+        5. Besitzerwechsel (Eroberung, Eliminierung) und Hauptstadt-
+           Status aendern Farbe/Text/Layout sofort, nicht erst irgendwann.
+
+    HINWEIS ZUR ARCHITEKTUR: Die Banner werden bewusst CLIENTSEITIG per
+    Code erzeugt (Projekt-Konvention "komplett code-generierte GUI") und
+    NICHT serverseitig ins City-Model gehaengt: Die Sichtbarkeit muss pro
+    Spieler dem Fog-of-War folgen, ein serverseitiges BillboardGui wuerde
+    aber an ALLE Clients replizieren. Das Template
+    ReplicatedStorage > Buildings > City bleibt deshalb banner-frei.
+
     KLICK:
         eigenes Banner  -> ClientState.Toggle(CITY, cityId) (öffnet CityGui)
         fremdes Banner  -> Info-Popup (Name, Besitzer, Gebäude, Bevölkerung)
@@ -53,13 +80,26 @@ print("[CityBannerController] geladen (LocalScript laeuft)")
 --------------------------------------------------------------------------------
 local BRONZE = Color3.fromRGB(120, 90, 50)
 local GOLD = Color3.fromRGB(255, 210, 60)
+
+-- Platzhalter-Farbe, solange die Owner-Daten noch nicht angekommen sind.
 local DEFAULT_COLOR = Color3.fromRGB(140, 140, 140)
+
+-- Farbe fuer BESITZLOSE Staedte (z.B. nach der Eliminierung des Besitzers,
+-- siehe VictorySystem.EliminatePlayer -> city.owner = nil). Das ist der
+-- einzige Fall, in dem ein Banner dauerhaft grau sein darf.
+local NEUTRAL_COLOR = Color3.fromRGB(128, 128, 128)
 
 --------------------------------------------------------------------------------
 -- STATE
 --------------------------------------------------------------------------------
 local banners = {}        -- [hexKey] = bannerEntry
 local bannerByCityId = {} -- [cityId] = hexKey
+
+-- Wird von currentFogState() gepflegt: steht auf false, solange der
+-- FogOfWarController keine Zustandsabfrage anbietet (_G.GetFogHexState).
+-- Der Heal-Loop nutzt das, um Banner nachzuladen, die sonst nie ein
+-- FogOfWarHexStateChanged-Event bekommen wuerden.
+local fogSourceAvailable = false
 
 --------------------------------------------------------------------------------
 -- HILFSFUNKTIONEN
@@ -124,13 +164,53 @@ local function destroyStrayBanners(buildingModel)
 	end
 end
 
+-- SINGLE-BANNER-GARANTIE (Fix "teilweise 2 Banner im Model"):
+-- Laesst an einem City-Gebaeude GENAU EIN Banner stehen. keepBillboard
+-- bleibt erhalten, jede andere Banner-BillboardGui wird entfernt -
+-- unabhaengig davon, woher sie stammt (Altlast einer frueheren Version,
+-- parallel laufender Rebuild, Model das aus einem alten Spielstand
+-- geladen wurde, ...). Wird nach jedem Erzeugen und periodisch im
+-- Heal-Loop aufgerufen.
+local function enforceSingleBanner(buildingModel, keepBillboard)
+	if not buildingModel or not buildingModel.Parent then return 0 end
+
+	local removed = 0
+	for _, child in ipairs(buildingModel:GetDescendants()) do
+		if child:IsA("BillboardGui")
+			and (child.Name == "CityBanner" or child.Name == "CapitalBanner")
+			and child ~= keepBillboard then
+			child:Destroy()
+			removed = removed + 1
+		end
+	end
+
+	-- Direkt am Model angedockte Banner (Adornee-auf-Model-Altlast).
+	for _, name in ipairs({ "CityBanner", "CapitalBanner" }) do
+		local direct = buildingModel:FindFirstChild(name)
+		if direct and direct:IsA("BillboardGui") and direct ~= keepBillboard then
+			direct:Destroy()
+			removed = removed + 1
+		end
+	end
+
+	if removed > 0 then
+		warn(("[Banner] %d doppelte Banner-BillboardGui(s) an %s entfernt - nur 1 pro City erlaubt")
+			:format(removed, buildingModel:GetFullName()))
+	end
+	return removed
+end
+
 
 --------------------------------------------------------------------------------
 -- BANNER-GUI ERZEUGEN (Fahnenform: Rechteck + 2 gedrehte Quadrate als
 -- Spitzen an den Enden). isCapital=true -> groesseres Gold-Design mit
 -- Krone und Glow, isCapital=false -> normales Bronze-Design.
 --------------------------------------------------------------------------------
-local function buildBannerGui(adorneePart, isCapital)
+local function buildBannerGui(adorneePart, isCapital, initialText, initialColor)
+	-- Bekanntes Aussehen direkt mitnehmen (Rebuild nach Besitzerwechsel /
+	-- Hauptstadt-Wechsel), damit nie kurz der Platzhalter aufblitzt.
+	local fillColor = initialColor or DEFAULT_COLOR
+
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = isCapital and "CapitalBanner" or "CityBanner"
 	billboard.Size = isCapital and UDim2.new(0, 250, 0, 70) or UDim2.new(0, 200, 0, 50)
@@ -138,16 +218,27 @@ local function buildBannerGui(adorneePart, isCapital)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 500
 	billboard.ResetOnSpawn = false
-	billboard.Enabled = false -- Fog-of-War entscheidet, wann es erscheint
+	-- Enabled startet auf false und wird UNMITTELBAR danach von
+	-- applyFogState() gesetzt (siehe tryAttachCityBanner/rebuildBanner):
+	--   unexplored           -> false
+	--   explored / visible   -> true
+	--   eigene Stadt         -> true (immer, auch ohne Fog-Information)
+	-- Kein anderer Code-Pfad darf dieses Banner dauerhaft auf false
+	-- stehen lassen - der Heal-Loop am Dateiende prueft das nach.
+	billboard.Enabled = false
 	billboard.Adornee = adorneePart
 	billboard.Parent = adorneePart
-	print("[Banner] BillboardGui erstellt fuer " .. adorneePart:GetFullName()
-		.. (isCapital and " (HAUPTSTADT)" or ""))
-	print("[Banner] Enabled:", billboard.Enabled,
-		"| Adornee:", billboard.Adornee and billboard.Adornee:GetFullName() or "nil",
-		"| StudsOffset:", billboard.StudsOffset,
-		"| Size:", billboard.Size,
-		"| MaxDistance:", billboard.MaxDistance)
+	print(("[Banner] %s erstellt an %s | Adornee: %s | Size: %s | StudsOffset: %s | MaxDistance: %d | AlwaysOnTop: %s")
+		:format(
+			billboard.Name,
+			adorneePart:GetFullName(),
+			billboard.Adornee and billboard.Adornee:GetFullName() or "nil",
+			tostring(billboard.Size),
+			tostring(billboard.StudsOffset),
+			billboard.MaxDistance,
+			tostring(billboard.AlwaysOnTop)
+		))
+	-- Hinweis: Enabled wird direkt danach von applyFogState() gesetzt.
 
 	local root = Instance.new("Frame")
 	root.Name = "Root"
@@ -182,7 +273,7 @@ local function buildBannerGui(adorneePart, isCapital)
 	flag.AnchorPoint = Vector2.new(0.5, 0.5)
 	flag.Position = UDim2.new(0.5, 0, 0.5, 0)
 	flag.Size = isCapital and UDim2.new(1, -34, 1, 0) or UDim2.new(1, -28, 1, 0)
-	flag.BackgroundColor3 = DEFAULT_COLOR
+	flag.BackgroundColor3 = fillColor
 	flag.BackgroundTransparency = 0.2
 	flag.BorderSizePixel = 0
 	flag.ZIndex = 2
@@ -209,7 +300,7 @@ local function buildBannerGui(adorneePart, isCapital)
 		tip.Position = UDim2.new(anchorX, 0, 0.5, 0)
 		tip.Size = UDim2.fromOffset(size, size)
 		tip.Rotation = 45
-		tip.BackgroundColor3 = DEFAULT_COLOR
+		tip.BackgroundColor3 = fillColor
 		tip.BackgroundTransparency = 0.2
 		tip.BorderSizePixel = 0
 		tip.ZIndex = 1
@@ -237,7 +328,9 @@ local function buildBannerGui(adorneePart, isCapital)
 	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 	nameLabel.TextWrapped = true
 	nameLabel.TextScaled = false
-	nameLabel.Text = "..."
+	-- Platzhalter, bis applyBannerInfo() den echten Stadtnamen setzt.
+	-- Darf nicht dauerhaft stehen bleiben (siehe refreshBannerData).
+	nameLabel.Text = initialText or "..."
 	nameLabel.ZIndex = 3
 	nameLabel.Parent = flag
 
@@ -326,37 +419,63 @@ local function setElementsTransparency(entry, fillT, strokeT, textT)
 	end
 end
 
+-- Setzt die Banner-Sichtbarkeit aus dem Fog-Zustand.
+-- REGEL: Enabled = false darf NUR bei "unexplored" vorkommen (und auch da
+-- nicht bei der eigenen Stadt). Das ist die einzige Stelle im Projekt, die
+-- ein City-Banner auf Enabled = false setzt - der FogOfWarController selbst
+-- fasst BillboardGuis bewusst NICHT an (er arbeitet nur mit Transparency
+-- auf BaseParts/Decals/Textures).
 local function applyFogState(entry, state)
-	if state == FogOfWarConfig.STATE.UNEXPLORED then
+	if not entry or not entry.billboard or not entry.billboard.Parent then return end
+
+	-- EIGENE Stadt -> immer sichtbar. Eine eigene Stadt ist selbst eine
+	-- Sichtquelle (FogOfWarConfig.CITY_SIGHT = 3), ihr Hex kann also
+	-- regelmaessig gar nicht "unexplored" sein. Falls doch (Fog-State
+	-- gerade nicht verfuegbar), soll das eigene Banner trotzdem sichtbar
+	-- sein, statt unsichtbar haengen zu bleiben.
+	local forceVisible = entry.isMine == true
+
+	if state == FogOfWarConfig.STATE.UNEXPLORED and not forceVisible then
 		entry.billboard.Enabled = false
 		entry.fogState = state
 		return
 	end
 
 	entry.billboard.Enabled = true
-	if state == FogOfWarConfig.STATE.VISIBLE then
-		setElementsTransparency(entry, 0.2, 0, 0)
-	else -- EXPLORED
+	if state == FogOfWarConfig.STATE.EXPLORED and not forceVisible then
+		-- erkundet, aber gerade nicht im Sichtfeld -> Geister-Look
 		setElementsTransparency(entry, 0.5, 0.5, 0.5)
+	else
+		-- sichtbar (oder eigene Stadt)
+		setElementsTransparency(entry, 0.2, 0, 0)
 	end
 	entry.fogState = state
-
-	print(("[Banner] Fog-Status fuer %s: %s -> Enabled: %s")
-		:format(entry.key, tostring(state), tostring(entry.billboard.Enabled)))
 end
 
 -- Aktuellen Fog-Zustand eines Hex ermitteln. Bevorzugt die synchrone
 -- _G.GetFogHexState-Abfrage aus FogOfWarController (deckt den Fall ab,
 -- dass ein Gebäude/Banner ERST NACH dem letzten Zustandswechsel des Hex
 -- entsteht - z.B. beim Nachladen oder bei einer neu gegründeten Stadt in
--- bereits erkundetem Gebiet). Fällt sonst auf UNEXPLORED zurück, bis das
--- naechste FogOfWarHexStateChanged-Event eintrifft.
+-- bereits erkundetem Gebiet).
+--
+-- FAIL-OPEN-STATT-FAIL-BLIND: Ist die Fog-Quelle (noch) nicht verfuegbar,
+-- wurde VISIBLE zurueckgegeben statt UNEXPLORED. Grund: UNEXPLORED haette
+-- das Banner auf Enabled = false gesetzt, und ohne FogOfWarController
+-- feuert auch niemals ein FogOfWarHexStateChanged-Event -> das Banner
+-- bliebe FUER IMMER unsichtbar (genau das gemeldete Bug-Bild). Der
+-- Heal-Loop korrigiert den Zustand spaeter auf den echten Wert, sobald
+-- _G.GetFogHexState existiert.
 local function currentFogState(key)
 	if type(_G.GetFogHexState) == "function" then
 		local ok, state = pcall(_G.GetFogHexState, key)
-		if ok and state then return state end
+		if ok and state then
+			fogSourceAvailable = true
+			return state
+		end
 	end
-	return FogOfWarConfig.STATE.UNEXPLORED
+
+	fogSourceAvailable = false
+	return FogOfWarConfig.STATE.VISIBLE
 end
 
 --------------------------------------------------------------------------------
@@ -511,97 +630,193 @@ end
 --------------------------------------------------------------------------------
 local rebuildBanner -- forward-declaration (siehe unten)
 
+-- MAX_FAST_RETRIES schnelle Versuche, danach unbegrenzt viele langsame
+-- Versuche (SLOW_RETRY_DELAY) bzw. der Heal-Loop am Dateiende.
+local MAX_FAST_RETRIES = 8
+local FAST_RETRY_DELAY = 0.5
+local SLOW_RETRY_DELAY = 5
+
+-- Wendet die Owner-Daten (Name, Farbe, isMine) auf ein bestehendes Banner
+-- an. Das ist die EINZIGE Stelle, die Text und Farbe setzt:
+--   Text  = Stadtname aus CityData (via GetCityPublicInfo.name)
+--   Farbe = Spielerfarbe des Besitzers (via GetCityPublicInfo.ownerColor)
+-- Der Platzhalter "..." und die graue Default-Farbe aus buildBannerGui
+-- werden hier ersetzt - und bleiben nie dauerhaft stehen, weil
+-- refreshBannerData() bei fehlgeschlagenen Abfragen immer wieder neu
+-- ansetzt (Retries + Heal-Loop).
 local function applyBannerInfo(entry, info)
-	local color = info.ownerColor or DEFAULT_COLOR
+	-- Besitzlos (city.owner == nil, z.B. nach Eliminierung) -> neutral grau.
+	-- Besitzer vorhanden aber Farbe fehlt -> ebenfalls Fallback, damit das
+	-- Banner nie farblos/unlesbar wird.
+	local color = info.ownerColor
+	if not color then
+		color = info.ownerUserId and DEFAULT_COLOR or NEUTRAL_COLOR
+	end
+
 	entry.flag.BackgroundColor3 = color
 	entry.tipLeft.BackgroundColor3 = color
 	entry.tipRight.BackgroundColor3 = color
 	entry.nameLabel.Text = tostring(info.name or "?")
+	entry.info = info
+	entry.dataResolved = true
 	entry.isMine = info.isMine and true or false
 
-	print(("[Banner] Owner: %s, Farbe: %s, Text: %s")
-		:format(tostring(info.ownerName), tostring(color), tostring(info.name)))
+	-- isMine kann die Sichtbarkeitsregel aendern (eigene Stadt = immer
+	-- sichtbar), deshalb den Fog-Zustand direkt neu lesen und anwenden
+	-- (billige lokale Abfrage, kein RPC).
+	applyFogState(entry, currentFogState(entry.key))
 end
 
--- RETRY-FIX (Schritt 2/3): GetCityOnHex/GetCityPublicInfo koennen kurz
--- nach dem Erstellen eines Banners fehlschlagen (Remote noch nicht
--- repliziert, CityData auf dem Server noch nicht committed, Netzwerk-
--- Hickup, ...). Der alte Code hat bei einem einzigen fehlgeschlagenen
--- Invoke einfach aufgegeben - das Banner blieb dann fuer immer beim
--- Platzhaltertext "..." und der grauen Default-Farbe haengen, weil
--- NICHTS sonst automatisch einen erneuten Versuch ausgeloest hat.
--- Jetzt wird bei einem Fehlschlag bis zu MAX_RETRIES mal erneut
--- versucht (mit kurzer Wartezeit dazwischen).
-local MAX_RETRIES = 8
-local RETRY_DELAY = 0.5
-
+-- RETRY-/HEAL-FIX: GetCityOnHex/GetCityPublicInfo koennen kurz nach dem
+-- Erstellen eines Banners fehlschlagen (Remote noch nicht repliziert,
+-- CityData auf dem Server noch nicht committed, Netzwerk-Hickup, ...).
+-- Der urspruengliche Code hat nach einem einzigen Fehlschlag aufgegeben -
+-- das Banner blieb dann FUER IMMER beim Platzhaltertext "..." und der
+-- grauen Default-Farbe, weil nichts sonst einen erneuten Versuch ausgeloest
+-- hat. Ausserdem war bannerByCityId[cityId] nie gefuellt, wodurch auch das
+-- CityStatsChanged-Event (Eroberung!) dieses Banner nicht mehr erreichen
+-- konnte - doppelt tot.
+--
+-- JETZT:
+--   * bis zu MAX_FAST_RETRIES schnelle Versuche (0.5s)
+--   * danach unbegrenzt langsame Versuche (5s)
+--   * zusaetzlich prueft der Heal-Loop am Dateiende unaufgeloeste Banner
+--   * entry.refreshing/refreshQueued verhindert parallele Doppel-Refreshes
+--     (die frueher zu doppelt gebauten Bannern fuehren konnten), ohne dass
+--     ein Event verloren geht.
 local function refreshBannerData(entry, attempt)
 	attempt = attempt or 1
+	if not entry or not entry.billboard or not entry.billboard.Parent then return end
+
+	if entry.refreshing then
+		entry.refreshQueued = true -- nicht vergessen, nach dem laufenden Durchlauf nachholen
+		return
+	end
+	entry.refreshing = true
 
 	task.spawn(function()
+		local info = nil
+
 		local ok1, cityOnHex = Net.Invoke("GetCityOnHex", entry.q, entry.r)
-		if not ok1 or not cityOnHex or not cityOnHex.id then
-			warn(("[Banner] GetCityOnHex fehlgeschlagen fuer %s (Versuch %d/%d)")
-				:format(entry.key, attempt, MAX_RETRIES))
-			if attempt < MAX_RETRIES then
-				task.delay(RETRY_DELAY, function() refreshBannerData(entry, attempt + 1) end)
+		if ok1 and cityOnHex and cityOnHex.id then
+			entry.cityId = cityOnHex.id
+			bannerByCityId[entry.cityId] = entry.key
+
+			local ok2, result = Net.Invoke("GetCityPublicInfo", entry.cityId)
+			if ok2 and result and result.exists then
+				info = result
+			elseif attempt <= MAX_FAST_RETRIES then
+				warn(("[Banner] GetCityPublicInfo fehlgeschlagen fuer City %s (Versuch %d/%d)")
+					:format(tostring(entry.cityId), attempt, MAX_FAST_RETRIES))
 			end
-			return
+		elseif attempt <= MAX_FAST_RETRIES then
+			warn(("[Banner] GetCityOnHex fehlgeschlagen fuer %s (Versuch %d/%d)")
+				:format(entry.key, attempt, MAX_FAST_RETRIES))
 		end
 
-		entry.cityId = cityOnHex.id
-		bannerByCityId[entry.cityId] = entry.key
+		entry.refreshing = false
 
-		local ok2, info = Net.Invoke("GetCityPublicInfo", entry.cityId)
-		if not ok2 or not info or not info.exists then
-			warn(("[Banner] GetCityPublicInfo fehlgeschlagen fuer City %s (Versuch %d/%d)")
-				:format(tostring(entry.cityId), attempt, MAX_RETRIES))
-			if attempt < MAX_RETRIES then
-				task.delay(RETRY_DELAY, function() refreshBannerData(entry, attempt + 1) end)
+		-- Nach dem laufenden Durchlauf noch ein offenes Event? -> sofort erneut.
+		local function runQueued()
+			if entry.refreshQueued then
+				entry.refreshQueued = false
+				refreshBannerData(entry, attempt)
 			end
+		end
+
+		if not info then
+			-- Noch keine Daten: spaeter erneut versuchen (schnell, dann langsam).
+			entry.pendingRetry = true
+			local delay = (attempt <= MAX_FAST_RETRIES) and FAST_RETRY_DELAY or SLOW_RETRY_DELAY
+			task.delay(delay, function()
+				entry.pendingRetry = nil
+				refreshBannerData(entry, attempt + 1)
+			end)
+			runQueued()
 			return
 		end
 
 		local wantsCapital = info.isCapital and true or false
 		if wantsCapital ~= entry.isCapital then
-			-- Hauptstadt-Status hat sich geändert -> Banner-Layout muss
+			-- Hauptstadt-Status hat sich geaendert -> Banner-Layout muss
 			-- gewechselt werden (Normal <-> Hauptstadtbanner).
+			-- WICHTIG: entry.info VOR dem Rebuild setzen, damit das neue
+			-- Banner sofort Name/Farbe kennt (kein "..."-Blitz) und ein
+			-- fehlgeschlagener Rebuild nicht in einer Endlosschleife landet.
+			entry.info = info
+			entry.dataResolved = true
 			print(("[Banner] Hauptstadt-Status von %s geaendert -> Banner wird neu gebaut")
 				:format(tostring(info.name)))
 			rebuildBanner(entry, wantsCapital)
+			runQueued()
 			return
 		end
 
-		entry.info = info
 		applyBannerInfo(entry, info)
+		runQueued()
 	end)
 end
 
 --------------------------------------------------------------------------------
 -- BANNER AN EIN CITY-GEBÄUDE ANHÄNGEN
 --------------------------------------------------------------------------------
-local function attachBannerUi(buildingModel, isCapital)
+local function attachBannerUi(buildingModel, isCapital, initialText, initialColor)
 	local adorneePart = findAdorneePart(buildingModel)
 	if not adorneePart then
 		warn("[Banner] Kein BasePart in " .. buildingModel:GetFullName()
 			.. " gefunden - Banner kann nicht angedockt werden!")
 		return nil
 	end
-	-- Schritt 5: sicherstellen, dass vor dem Neubau KEIN Alt-Banner mehr
-	-- an diesem Gebäude haengt (verhindert Duplikate).
+
+	-- VOR dem Neubau: sicherstellen, dass kein Alt-Banner mehr an diesem
+	-- Gebaeude haengt (Reste frueherer Versionen / eines alten Spielstands).
 	destroyStrayBanners(buildingModel)
-	return buildBannerGui(adorneePart, isCapital)
+
+	local ui = buildBannerGui(adorneePart, isCapital, initialText, initialColor)
+
+	-- NACH dem Neubau: harte Garantie "genau 1 Banner pro City".
+	enforceSingleBanner(buildingModel, ui.billboard)
+
+	return ui
 end
 
-local function tryAttachCityBanner(buildingModel)
+local function tryAttachCityBanner(buildingModel, attempt)
+	attempt = attempt or 1
+
 	local key, q, r = hexKeyFromBuildingName(buildingModel.Name)
 	if not key then return end
-	if banners[key] then return end -- schon vorhanden
 
-	print("[Banner] Gefunden: " .. buildingModel.Name)
+	-- Fuer dieses Hex gibt es schon einen Banner-Eintrag: kein zweites
+	-- Banner bauen (Dedupe), aber das Entry auf das aktuelle Model
+	-- nachziehen (das Gebaeude-Model kann ersetzt worden sein, z.B.
+	-- Camp -> City oder nach einer Eroberung).
+	local existing = banners[key]
+	if existing then
+		if existing.buildingModel ~= buildingModel then
+			existing.buildingModel = buildingModel
+			existing.dataResolved = false -- Daten neu ziehen (Owner kann anders sein)
+		end
+		enforceSingleBanner(buildingModel, existing.billboard)
+		return
+	end
 
 	local ui = attachBannerUi(buildingModel, false)
-	if not ui then return end
+	if not ui then
+		-- REPLIKATIONS-RACE: Beim ChildAdded-Event kann das City-Model noch
+		-- ohne BasePart/PrimaryPart beim Client ankommen (die Descendants
+		-- folgen einen Tick spaeter). attachBannerUi findet dann kein
+		-- Adornee-Part -> es entstuende UEBERHAUPT KEIN Banner fuer diese
+		-- Stadt, und nichts wuerde es je nachtraeglich anlegen.
+		-- Deshalb: kurz warten und erneut versuchen (begrenzt, 20x0.5s).
+		if attempt < 20 and buildingModel.Parent then
+			task.delay(0.5, function()
+				if not banners[key] and buildingModel.Parent then
+					tryAttachCityBanner(buildingModel, attempt + 1)
+				end
+			end)
+		end
+		return
+	end
 
 	local entry = {
 		key = key, q = q, r = r,
@@ -619,6 +834,12 @@ local function tryAttachCityBanner(buildingModel)
 		info = nil,
 		isMine = false,
 		isCapital = false,
+		-- Daten-Status fuer Retries/Heal-Loop (siehe refreshBannerData).
+		dataResolved = false,
+		refreshing = false,
+		refreshQueued = false,
+		pendingRetry = false,
+		rebuilding = false,
 		fogState = FogOfWarConfig.STATE.UNEXPLORED,
 	}
 	banners[key] = entry
@@ -638,13 +859,41 @@ end
 -- eines Eintrags und baut es mit dem jeweils passenden Layout
 -- (Normal-/Hauptstadtbanner) neu auf. Wird gebraucht, wenn sich der
 -- Hauptstadt-Status einer bereits bekannten Stadt ändert.
+-- Name/Farbe werden aus entry.info uebernommen, damit beim Umbau kein
+-- Platzhalter ("...", grau) aufblitzt.
 rebuildBanner = function(entry, isCapital)
+	if not entry or not entry.buildingModel or not entry.buildingModel.Parent then return end
+	if entry.rebuilding then return end
+	entry.rebuilding = true
+
+	-- isCapital VOR dem Neubau setzen: schlaegt der Neubau fehl, wuerde
+	-- sonst jeder weitere Refresh erneut einen Rebuild anstossen
+	-- (Endlosschleife + Banner-Chaos).
+	entry.isCapital = isCapital and true or false
+
 	if entry.billboard and entry.billboard.Parent then
 		entry.billboard:Destroy()
 	end
+	entry.billboard = nil
 
-	local ui = attachBannerUi(entry.buildingModel, isCapital)
-	if not ui then return end
+	local info = entry.info
+	local ui = attachBannerUi(
+		entry.buildingModel,
+		entry.isCapital,
+		info and info.name,
+		info and info.ownerColor
+	)
+
+	entry.rebuilding = false
+
+	if not ui then
+		-- Gebaeude hat gerade keine BasePart -> Daten als unaufgeloest
+		-- markieren, der Heal-Loop versucht den Neubau spaeter erneut.
+		entry.dataResolved = false
+		warn("[Banner] Rebuild fuer " .. entry.key
+			.. " nicht moeglich - Heal-Loop versucht es erneut")
+		return
+	end
 
 	entry.billboard = ui.billboard
 	entry.flag = ui.flag
@@ -655,19 +904,23 @@ rebuildBanner = function(entry, isCapital)
 	entry.flagStroke = ui.flagStroke
 	entry.glow = ui.glow
 	entry.crownLabel = ui.crownLabel
-	entry.isCapital = isCapital
 
 	ui.clickButton.Activated:Connect(function()
 		onBannerClicked(entry)
 	end)
 
 	applyFogState(entry, currentFogState(entry.key))
-	refreshBannerData(entry)
+
+	if info then
+		applyBannerInfo(entry, info)
+	else
+		refreshBannerData(entry)
+	end
 end
 
-local function removeBanner(name)
-	local key = hexKeyFromBuildingName(name)
-	if not key then return end
+-- Banner ueber den Hex-Key entfernen (Gebaeude zerstoert/ersetzt oder
+-- Eintrag im Heal-Loop als verwaist erkannt).
+local function removeBannerByKey(key)
 	local entry = banners[key]
 	if not entry then return end
 
@@ -680,9 +933,17 @@ local function removeBanner(name)
 	banners[key] = nil
 end
 
+local function removeBanner(name)
+	local key = hexKeyFromBuildingName(name)
+	if not key then return end
+	removeBannerByKey(key)
+end
+
 --------------------------------------------------------------------------------
 -- BUILDINGS-FOLDER BEOBACHTEN
 --------------------------------------------------------------------------------
+local watchedBuildingsFolder = nil
+
 local function connectBuildingsWatcher()
 	print("[Banner] Suche Cities in Buildings...")
 
@@ -697,8 +958,17 @@ local function connectBuildingsWatcher()
 		return
 	end
 
+	-- Doppelte Verbindungen vermeiden (diese Funktion wird auch nach einem
+	-- HexMap-Neubau erneut aufgerufen).
+	if watchedBuildingsFolder == buildingsFolder then
+		return
+	end
+	watchedBuildingsFolder = buildingsFolder
+
 	for _, child in ipairs(buildingsFolder:GetChildren()) do
-		tryAttachCityBanner(child)
+		if child.Name:match("^City_") then
+			tryAttachCityBanner(child)
+		end
 	end
 
 	-- Neu gebaute/replizierte Cities bekommen SOFORT ein Banner.
@@ -720,35 +990,49 @@ task.spawn(connectBuildingsWatcher)
 workspace.ChildAdded:Connect(function(child)
 	if child.Name == "HexMap" then
 		task.wait(1)
-		for key, entry in pairs(banners) do
-			if entry.billboard and entry.billboard.Parent then
-				entry.billboard:Destroy()
-			end
-			banners[key] = nil
+		for key in pairs(banners) do
+			removeBannerByKey(key)
 		end
 		bannerByCityId = {}
+		watchedBuildingsFolder = nil
 		connectBuildingsWatcher()
 	end
 end)
 
 --------------------------------------------------------------------------------
 -- FOG-OF-WAR-EVENT ABONNIEREN (siehe FogOfWarController.setHexState)
+--
+-- NICHT-BLOCKIEREND: hier stand frueher WaitForChild("FogOfWarHexStateChanged", 30).
+-- Solange der FogOfWarController das BindableEvent nicht angelegt hatte,
+-- blockierte das den REST dieses LocalScripts um bis zu 30 Sekunden - die
+-- Listener fuer CityStatsChanged/CapitalCityMarked wurden also genau in der
+-- Phase verbunden, in der Staedte gegruendet/erobert werden. Folge: Banner
+-- blieben grau, mit "..." oder im falschen (Nicht-Hauptstadt-)Layout.
+-- Jetzt wird das Event bei Bedarf selbst angelegt (identisches Pattern wie
+-- im FogOfWarController: erst FindFirstChild, dann Create) und die Listener
+-- darunter sind SOFORT scharf.
 --------------------------------------------------------------------------------
-local hexStateEvent = ReplicatedStorage:WaitForChild("FogOfWarHexStateChanged", 30)
-if hexStateEvent then
-	hexStateEvent.Event:Connect(function(key, state)
-		local entry = banners[key]
-		if entry then
-			applyFogState(entry, state)
-		end
-	end)
-else
-	warn("[Banner] FogOfWarHexStateChanged-Event nicht gefunden - Banner-Sichtbarkeit bleibt ggf. unsynchron!")
+local hexStateEvent = ReplicatedStorage:FindFirstChild("FogOfWarHexStateChanged")
+if not hexStateEvent or not hexStateEvent:IsA("BindableEvent") then
+	if hexStateEvent then
+		hexStateEvent:Destroy()
+	end
+	hexStateEvent = Instance.new("BindableEvent")
+	hexStateEvent.Name = "FogOfWarHexStateChanged"
+	hexStateEvent.Parent = ReplicatedStorage
+	warn("[Banner] FogOfWarHexStateChanged fehlte - BindableEvent selbst angelegt")
 end
 
+hexStateEvent.Event:Connect(function(key, state)
+	local entry = banners[key]
+	if entry then
+		applyFogState(entry, state)
+	end
+end)
+
 --------------------------------------------------------------------------------
--- CityStatsChanged (Server -> Client): Eroberung/Umbenennung -> Banner
--- neu einfärben (Test-Szenario: Banner-Farbe wechselt nach Eroberung).
+-- CityStatsChanged (Server -> Client): Eroberung/Umbenennung/Bevoelkerung ->
+-- Banner neu einfärben (Test-Szenario: Banner-Farbe wechselt nach Eroberung).
 --------------------------------------------------------------------------------
 Net.On("CityStatsChanged", function(cityId)
 	local key = bannerByCityId[cityId]
@@ -757,23 +1041,150 @@ Net.On("CityStatsChanged", function(cityId)
 		task.delay(0.1, function()
 			refreshBannerData(entry)
 		end)
+		return
+	end
+
+	-- FALLBACK: die cityId ist (noch) keinem Banner zugeordnet - z.B. weil
+	-- der erste GetCityOnHex-Call dieses Banners fehlgeschlagen ist. Ohne
+	-- diesen Fallback bliebe ausgerechnet dieses Banner nach einer
+	-- Eroberung dauerhaft in der alten Farbe/beim alten Text haengen.
+	-- Deshalb werden alle noch unaufgeloesten Banner nachgezogen.
+	for _, other in pairs(banners) do
+		if not other.dataResolved or other.cityId == cityId then
+			task.delay(0.1, function()
+				refreshBannerData(other)
+			end)
+		end
 	end
 end)
 
 --------------------------------------------------------------------------------
 -- CapitalCityMarked (Server -> Client): eine neue Hauptstadt wurde
--- gegründet -> das betroffene Banner (falls schon geladen) sofort auf
--- Hauptstadt-Layout umstellen, ohne auf das naechste CityStatsChanged
--- warten zu muessen.
+-- gegründet -> das betroffene Banner SOFORT auf Hauptstadt-Layout umstellen,
+-- ohne auf das naechste CityStatsChanged warten zu muessen.
+--
+-- Das Event kommt direkt nach CitySystem.FoundCity, also moeglicherweise
+-- BEVOR das neue City-Model beim Client repliziert ist. Deshalb wird das
+-- Banner ueber die mitgelieferten Koordinaten (q/r) gesucht und bei Bedarf
+-- kurz gewartet und erneut versucht.
 --------------------------------------------------------------------------------
-Net.On("CapitalCityMarked", function(payload)
-	if not payload or not payload.cityId then return end
-	local key = bannerByCityId[payload.cityId]
-	local entry = key and banners[key]
+local function refreshCapitalBanner(payload, attempt)
+	attempt = attempt or 1
+	if not payload then return end
+
+	local key = (payload.q ~= nil and payload.r ~= nil)
+		and (tostring(payload.q) .. "_" .. tostring(payload.r))
+		or nil
+	local byCoords = key and banners[key] or nil
+	local byCityId = payload.cityId and banners[bannerByCityId[payload.cityId] or ""] or nil
+	local entry = byCoords or byCityId
+
 	if entry then
+		if payload.cityId then
+			bannerByCityId[payload.cityId] = entry.key
+		end
 		task.delay(0.1, function()
 			refreshBannerData(entry)
 		end)
+		return
+	end
+
+	-- City-Model noch nicht da -> kurz warten und erneut versuchen.
+	if attempt < 10 then
+		task.delay(0.5, function()
+			refreshCapitalBanner(payload, attempt + 1)
+		end)
+	end
+end
+
+Net.On("CapitalCityMarked", refreshCapitalBanner)
+
+--------------------------------------------------------------------------------
+-- PlayerEliminated (Server -> Client): VictorySystem.EliminatePlayer setzt
+-- alle Staedte des eliminierten Spielers auf owner = nil. Die Banner muessen
+-- danach neutral grau werden (und den Hauptstadt-Look verlieren).
+--------------------------------------------------------------------------------
+Net.On("PlayerEliminated", function()
+	for _, entry in pairs(banners) do
+		task.delay(0.1, function()
+			refreshBannerData(entry)
+		end)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- HEAL-LOOP (Selbstheilung, 1x pro Sekunde)
+--
+-- Faengt alles ab, was ueber Events allein nicht sicher abgedeckt ist:
+--   1. Fog-Zustand: Event verpasst (Banner entstand NACH dem letzten
+--      Zustandswechsel) oder FogOfWarController laedt erst spaeter ->
+--      Zustand neu lesen und anwenden. Ohne das bleibt Enabled = false.
+--   2. Daten: Banner ohne aufgeloeste Info (Text "...", graue Farbe) ->
+--      langsamer Retry, bis Name/Farbe vom Server da sind.
+--   3. Duplikate: es haengt mehr als ein Banner am Gebaeude -> ueberzaehlige
+--      entfernen (nur alle paar Sekunden, das ist billig aber nicht gratis).
+--   4. Verwaiste Eintraege: Gebaeude-Model ist weg -> Eintrag loeschen.
+--   5. Cities ohne Banner-Eintrag -> Banner nachtraeglich anhaengen.
+--------------------------------------------------------------------------------
+local DEDUPE_SWEEP_INTERVAL = 5
+local lastDedupeSweep = 0
+
+task.spawn(function()
+	while true do
+		task.wait(1)
+
+		local now = tick()
+		local doDedupeSweep = (now - lastDedupeSweep) >= DEDUPE_SWEEP_INTERVAL
+		if doDedupeSweep then
+			lastDedupeSweep = now
+		end
+
+		-- 5) Cities OHNE Banner-Eintrag nachtraeglich anhaengen (Replikations-
+		--    Race beim ChildAdded, neu gegruendete Stadt, nach einem Heal
+		--    verworfener Eintrag, ...). tryAttachCityBanner ist idempotent:
+		--    fuer bestehende Eintraege wird nur die Dedupe-Garantie geprueft.
+		if doDedupeSweep and watchedBuildingsFolder and watchedBuildingsFolder.Parent then
+			for _, child in ipairs(watchedBuildingsFolder:GetChildren()) do
+				if child.Name:match("^City_") then
+					tryAttachCityBanner(child)
+				end
+			end
+		end
+
+		for key, entry in pairs(banners) do
+			local model = entry.buildingModel
+			if not model or not model.Parent then
+				-- 4) Gebaeude existiert nicht mehr.
+				removeBannerByKey(key)
+			else
+				-- 1) Fog-Zustand heilen.
+				if entry.billboard and entry.billboard.Parent then
+					local state = currentFogState(key)
+					local wronglyHidden = not entry.billboard.Enabled
+						and (entry.isMine or state ~= FogOfWarConfig.STATE.UNEXPLORED)
+					if state ~= entry.fogState or wronglyHidden or not fogSourceAvailable then
+						applyFogState(entry, state)
+					end
+
+					-- 3) Duplikate entfernen.
+					if doDedupeSweep then
+						enforceSingleBanner(model, entry.billboard)
+					end
+				else
+					-- Banner-GUI fehlt (z.B. weil ein Rebuild ohne BasePart
+					-- fehlgeschlagen ist) -> Eintrag verwerfen und neu anhaengen.
+					removeBannerByKey(key)
+					tryAttachCityBanner(model)
+				end
+
+				-- 2) Daten heilen (nur wenn gerade kein Retry laeuft).
+				local refreshed = banners[key]
+				if refreshed and not refreshed.dataResolved
+					and not refreshed.refreshing and not refreshed.pendingRetry then
+					refreshBannerData(refreshed, MAX_FAST_RETRIES + 1)
+				end
+			end
+		end
 	end
 end)
 
