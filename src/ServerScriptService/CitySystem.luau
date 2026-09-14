@@ -285,46 +285,28 @@ function CitySystem.FoundCity(player, campId)
 end
 
 --------------------------------------------------------------------------------
--- addCapitalMarker(model, q, r, playerName) - goldener Stern + "Hauptstadt von X"
+-- addCapitalMarker(model, q, r, playerName) - EHEMALS goldener Stern.
+--
+-- ERSETZT durch das Hauptstadt-Fantasy-Banner aus CityBannerController
+-- (client-seitig, code-generiert, Gold-Rahmen + Krone + Glow - siehe
+-- StarterPlayerScripts > CityBannerController.client.luau). Diese Funktion
+-- ist bewusst zu einem No-Op geworden (keine BillboardGui mehr), damit der
+-- alte Stern nicht mehr entsteht. Sie bleibt als Funktion erhalten, falls
+-- andere Server-Scripts sie noch aufrufen (siehe FoundCity oben) - ein
+-- Loeschen des Aufrufs war nicht noetig, da der Stern jetzt serverseitig
+-- schlicht nicht mehr erzeugt wird.
 --------------------------------------------------------------------------------
 function CitySystem.addCapitalMarker(model, q, r, playerName)
 	if not model then return end
-	if model:FindFirstChild("CapitalMarker") then return end
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "CapitalMarker"
-	billboard.Size = UDim2.fromOffset(260, 80)
-	billboard.StudsOffset = Vector3.new(0, 6, 0)
-	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 500
-	billboard.SizeOffset = Vector2.new(0, 0)
-	billboard.ResetOnSpawn = false
-	billboard.Parent = model
+	-- Altes CapitalMarker-BillboardGui entfernen, falls es (z.B. aus einem
+	-- alten Spielstand/Studio-Test) noch existiert.
+	local oldMarker = model:FindFirstChild("CapitalMarker")
+	if oldMarker then
+		oldMarker:Destroy()
+	end
 
-	local star = Instance.new("TextLabel")
-	star.Name = "Star"
-	star.Size = UDim2.fromScale(1, 0.55)
-	star.Position = UDim2.fromScale(0, 0)
-	star.BackgroundTransparency = 1
-	star.Text = "⭐"
-	star.TextSize = 40
-	star.TextColor3 = Color3.fromRGB(255, 215, 0)
-	star.Parent = billboard
-
-	local label = Instance.new("TextLabel")
-	label.Name = "Label"
-	label.Size = UDim2.fromScale(1, 0.45)
-	label.Position = UDim2.fromScale(0, 0.55)
-	label.BackgroundTransparency = 1
-	label.Text = "Hauptstadt von " .. tostring(playerName or "?")
-	label.TextSize = 15
-	label.TextScaled = false
-	label.TextWrapped = false
-	label.TextColor3 = Color3.fromRGB(255, 215, 0)
-	label.Font = Enum.Font.GothamBold
-	label.Parent = billboard
-
-	return billboard
+	return nil
 end
 
 --------------------------------------------------------------------------------

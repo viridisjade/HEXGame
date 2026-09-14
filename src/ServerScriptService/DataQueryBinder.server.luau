@@ -211,6 +211,7 @@ local function getCityPublicInfo(player, cityId)
 	local owner = city.owner
 	local buildingCount = (city.buildings and #city.buildings) or 0
 	local population = tonumber(city.population) or tonumber(city.citizenCount) or 0
+	local isCapital = owner ~= nil and PlayerData.GetCapitalCityId(owner) == city.id
 
 	return {
 		exists      = true,
@@ -222,6 +223,7 @@ local function getCityPublicInfo(player, cityId)
 		ownerName   = owner and owner.Name or "Niemand",
 		ownerColor  = owner and PlayerData.GetColor(owner) or Color3.fromRGB(140, 140, 140),
 		isMine      = (owner ~= nil and owner == player),
+		isCapital   = isCapital,
 		buildingCount = buildingCount,
 		population    = population,
 	}

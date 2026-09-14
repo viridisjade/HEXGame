@@ -111,6 +111,16 @@ local function getState(key)
 	return FogOfWarConfig.STATE.UNEXPLORED
 end
 
+-- Zusaetzlich zum Event (das nur bei AENDERUNGEN feuert) eine synchrone
+-- Abfrage des AKTUELLEN Zustands bereitstellen. Ohne das koennte ein
+-- Listener, der sich NACH dem letzten Zustandswechsel eines Hex anmeldet
+-- (z.B. CityBannerController fuer ein Gebaeude, das schon laengst sichtbar
+-- ist), fuer immer im falschen ("unexplored") Zustand haengen bleiben.
+-- Folgt dem bestehenden _G-Pattern (siehe HoverPreview/StrategyCam).
+_G.GetFogHexState = function(key)
+	return getState(key)
+end
+
 --------------------------------------------------------------------------------
 -- TRANSPARENZ SETZEN (sicher, KEIN .Visible auf BaseParts!)
 --------------------------------------------------------------------------------

@@ -3,7 +3,21 @@
     Ort: StarterPlayer > StarterPlayerScripts > CityBannerController
 
     Erzeugt über jeder Stadt ein komplett per Code generiertes Fantasy-
-    Banner (BillboardGui) in der Farbe des Besitzers.
+    Banner (BillboardGui) in der Farbe des Besitzers. Die Hauptstadt
+    bekommt statt des normalen Banners ein groesseres, goldenes
+    Hauptstadt-Banner mit Krone und Glow-Effekt (ersetzt den alten
+    goldenen Stern aus CitySystem.addCapitalMarker).
+
+    WICHTIGER BUGFIX (siehe unten "ADORNEE-BUG"):
+        BillboardGui.Adornee akzeptiert laut Roblox-API NUR ein BasePart
+        oder Attachment - NIEMALS ein Model. Die City-Gebaeude im
+        Workspace ("City_q_r", siehe CitySystem.swapModelToCity) sind
+        aber Models mit einem PrimaryPart. Der vorherige Code hat
+        billboard.Adornee direkt auf das Model gesetzt -> das Banner
+        wurde nirgendwo angedockt und war deshalb NIE sichtbar.
+        FIX: Adornee wird jetzt auf model.PrimaryPart gesetzt (mit
+        Fallback auf den ersten gefundenen BasePart, falls PrimaryPart
+        fehlt).
 
     SICHTBARKEIT (folgt dem Fog-of-War, siehe FogOfWarController):
         unexplored -> Banner unsichtbar (BillboardGui.Enabled = false)
@@ -16,7 +30,8 @@
 
     Datenquelle: DataRemotes > GetCityOnHex (liefert die cityId für ein
     Hex) + DataRemotes > GetCityPublicInfo (liefert Name/Besitzer/Farbe/
-    Gebäude/Bevölkerung OHNE Besitz-Prüfung - für fremde Städte gedacht).
+    Gebäude/Bevölkerung/isCapital OHNE Besitz-Prüfung - für fremde
+    Städte gedacht).
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -34,9 +49,10 @@ Net.Warmup({ "GetCityOnHex", "GetCityPublicInfo" })
 print("[CityBannerController] geladen (LocalScript laeuft)")
 
 --------------------------------------------------------------------------------
--- STIL (Fantasy, bronze Rahmen - wie alle anderen Fantasy-Fenster im Spiel)
+-- STIL
 --------------------------------------------------------------------------------
 local BRONZE = Color3.fromRGB(120, 90, 50)
+local GOLD = Color3.fromRGB(255, 210, 60)
 local DEFAULT_COLOR = Color3.fromRGB(140, 140, 140)
 
 --------------------------------------------------------------------------------
@@ -55,21 +71,45 @@ local function hexKeyFromBuildingName(name)
 	return q .. "_" .. r, tonumber(q), tonumber(r)
 end
 
+-- ADORNEE-BUG-FIX: BillboardGui.Adornee darf NUR ein BasePart oder
+-- Attachment sein, niemals ein Model. City-Gebäude sind Models
+-- (siehe CitySystem.swapModelToCity) - wir müssen also den PrimaryPart
+-- (oder ersatzweise den ersten BasePart-Nachfahren) herausfinden.
+local function findAdorneePart(buildingModel)
+	if buildingModel:IsA("BasePart") then
+		return buildingModel
+	end
+	if buildingModel:IsA("Model") then
+		if buildingModel.PrimaryPart then
+			return buildingModel.PrimaryPart
+		end
+		for _, child in ipairs(buildingModel:GetDescendants()) do
+			if child:IsA("BasePart") then
+				return child
+			end
+		end
+	end
+	return nil
+end
+
 --------------------------------------------------------------------------------
 -- BANNER-GUI ERZEUGEN (Fahnenform: Rechteck + 2 gedrehte Quadrate als
--- Spitzen an den Enden, bronzefarbener Rahmen, Innenfläche = Besitzerfarbe)
+-- Spitzen an den Enden). isCapital=true -> groesseres Gold-Design mit
+-- Krone und Glow, isCapital=false -> normales Bronze-Design.
 --------------------------------------------------------------------------------
-local function buildBannerGui(buildingModel)
+local function buildBannerGui(adorneePart, isCapital)
 	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "CityBanner"
-	billboard.Size = UDim2.new(0, 200, 0, 50)
-	billboard.StudsOffset = Vector3.new(0, 8, 0)
+	billboard.Name = isCapital and "CapitalBanner" or "CityBanner"
+	billboard.Size = isCapital and UDim2.new(0, 250, 0, 70) or UDim2.new(0, 200, 0, 50)
+	billboard.StudsOffset = isCapital and Vector3.new(0, 10, 0) or Vector3.new(0, 8, 0)
 	billboard.AlwaysOnTop = true
 	billboard.MaxDistance = 500
 	billboard.ResetOnSpawn = false
 	billboard.Enabled = false -- Fog-of-War entscheidet, wann es erscheint
-	billboard.Adornee = buildingModel
-	billboard.Parent = buildingModel
+	billboard.Adornee = adorneePart
+	billboard.Parent = adorneePart
+	print("[Banner] BillboardGui erstellt fuer " .. adorneePart:GetFullName()
+		.. (isCapital and " (HAUPTSTADT)" or ""))
 
 	local root = Instance.new("Frame")
 	root.Name = "Root"
@@ -78,12 +118,32 @@ local function buildBannerGui(buildingModel)
 	root.ClipsDescendants = false
 	root.Parent = billboard
 
+	-- Gold-Glow (nur Hauptstadt): leicht groesserer Frame HINTER der
+	-- Fahne mit hoher Transparenz, erzeugt einen sanften Leucht-Effekt.
+	local glow = nil
+	if isCapital then
+		glow = Instance.new("Frame")
+		glow.Name = "Glow"
+		glow.AnchorPoint = Vector2.new(0.5, 0.5)
+		glow.Position = UDim2.new(0.5, 0, 0.5, 0)
+		glow.Size = UDim2.new(1, -12, 1, 10)
+		glow.BackgroundColor3 = GOLD
+		glow.BackgroundTransparency = 0.7
+		glow.BorderSizePixel = 0
+		glow.ZIndex = 1
+		glow.Parent = root
+
+		local glowCorner = Instance.new("UICorner")
+		glowCorner.CornerRadius = UDim.new(0, 8)
+		glowCorner.Parent = glow
+	end
+
 	-- Hauptfläche der Fahne
 	local flag = Instance.new("Frame")
 	flag.Name = "Flag"
 	flag.AnchorPoint = Vector2.new(0.5, 0.5)
 	flag.Position = UDim2.new(0.5, 0, 0.5, 0)
-	flag.Size = UDim2.new(1, -28, 1, 0)
+	flag.Size = isCapital and UDim2.new(1, -34, 1, 0) or UDim2.new(1, -28, 1, 0)
 	flag.BackgroundColor3 = DEFAULT_COLOR
 	flag.BackgroundTransparency = 0.2
 	flag.BorderSizePixel = 0
@@ -96,19 +156,20 @@ local function buildBannerGui(buildingModel)
 
 	local flagStroke = Instance.new("UIStroke")
 	flagStroke.Name = "FlagStroke"
-	flagStroke.Thickness = 2
-	flagStroke.Color = BRONZE
+	flagStroke.Thickness = isCapital and 3 or 2
+	flagStroke.Color = isCapital and GOLD or BRONZE
 	flagStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	flagStroke.Parent = flag
 
 	-- Fahnen-Spitzen: kleine, um 45° gedrehte Quadrate links/rechts, damit
 	-- die Fahne spitz zulaufend statt rein rechteckig wirkt.
 	local function makeTip(anchorX, name)
+		local size = isCapital and 18 or 14
 		local tip = Instance.new("Frame")
 		tip.Name = name
 		tip.AnchorPoint = Vector2.new(0.5, 0.5)
 		tip.Position = UDim2.new(anchorX, 0, 0.5, 0)
-		tip.Size = UDim2.fromOffset(14, 14)
+		tip.Size = UDim2.fromOffset(size, size)
 		tip.Rotation = 45
 		tip.BackgroundColor3 = DEFAULT_COLOR
 		tip.BackgroundTransparency = 0.2
@@ -117,8 +178,8 @@ local function buildBannerGui(buildingModel)
 		tip.Parent = root
 
 		local tipStroke = Instance.new("UIStroke")
-		tipStroke.Thickness = 2
-		tipStroke.Color = BRONZE
+		tipStroke.Thickness = isCapital and 3 or 2
+		tipStroke.Color = isCapital and GOLD or BRONZE
 		tipStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		tipStroke.Parent = tip
 
@@ -128,21 +189,49 @@ local function buildBannerGui(buildingModel)
 	local tipLeft = makeTip(0.015, "TipLeft")
 	local tipRight = makeTip(0.985, "TipRight")
 
-	-- Stadtname: weiß mit schwarzer Kontur
+	-- Hauptstadt: zweizeilig - "👑 HAUPTSTADT 👑" oben, Stadtname unten.
+	local crownLabel = nil
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "CityName"
 	nameLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-	nameLabel.Position = UDim2.fromScale(0.5, 0.5)
-	nameLabel.Size = UDim2.new(1, -12, 1, -4)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.FredokaOne
-	nameLabel.TextSize = 14
 	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 	nameLabel.TextWrapped = true
 	nameLabel.TextScaled = false
 	nameLabel.Text = "..."
 	nameLabel.ZIndex = 3
 	nameLabel.Parent = flag
+
+	if isCapital then
+		crownLabel = Instance.new("TextLabel")
+		crownLabel.Name = "CrownLabel"
+		crownLabel.AnchorPoint = Vector2.new(0.5, 0)
+		crownLabel.Position = UDim2.new(0.5, 0, 0, 2)
+		crownLabel.Size = UDim2.new(1, -12, 0, 22)
+		crownLabel.BackgroundTransparency = 1
+		crownLabel.Font = Enum.Font.FredokaOne
+		crownLabel.TextSize = 15
+		crownLabel.TextColor3 = GOLD
+		crownLabel.Text = "👑 HAUPTSTADT 👑"
+		crownLabel.ZIndex = 3
+		crownLabel.Parent = flag
+
+		local crownStroke = Instance.new("UIStroke")
+		crownStroke.Thickness = 2
+		crownStroke.Color = Color3.fromRGB(0, 0, 0)
+		crownStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Outline
+		crownStroke.Parent = crownLabel
+
+		nameLabel.Position = UDim2.new(0.5, 0, 1, -4)
+		nameLabel.AnchorPoint = Vector2.new(0.5, 1)
+		nameLabel.Size = UDim2.new(1, -12, 0, 24)
+		nameLabel.TextSize = 15
+	else
+		nameLabel.Position = UDim2.fromScale(0.5, 0.5)
+		nameLabel.Size = UDim2.new(1, -12, 1, -4)
+		nameLabel.TextSize = 14
+	end
 
 	local nameStroke = Instance.new("UIStroke")
 	nameStroke.Name = "NameStroke"
@@ -170,6 +259,9 @@ local function buildBannerGui(buildingModel)
 		nameStroke = nameStroke,
 		flagStroke = flagStroke,
 		clickButton = clickButton,
+		glow = glow,
+		crownLabel = crownLabel,
+		isCapital = isCapital,
 	}
 end
 
@@ -187,11 +279,19 @@ local function setElementsTransparency(entry, fillT, strokeT, textT)
 	entry.flagStroke.Transparency = strokeT
 	entry.nameLabel.TextTransparency = textT
 	entry.nameStroke.Transparency = strokeT
+	if entry.crownLabel then
+		entry.crownLabel.TextTransparency = textT
+	end
+	if entry.glow then
+		-- Glow bleibt immer dezenter als die Fahne selbst.
+		entry.glow.BackgroundTransparency = math.clamp(fillT + 0.5, 0, 1)
+	end
 end
 
 local function applyFogState(entry, state)
 	if state == FogOfWarConfig.STATE.UNEXPLORED then
 		entry.billboard.Enabled = false
+		entry.fogState = state
 		return
 	end
 
@@ -202,6 +302,20 @@ local function applyFogState(entry, state)
 		setElementsTransparency(entry, 0.5, 0.5, 0.5)
 	end
 	entry.fogState = state
+end
+
+-- Aktuellen Fog-Zustand eines Hex ermitteln. Bevorzugt die synchrone
+-- _G.GetFogHexState-Abfrage aus FogOfWarController (deckt den Fall ab,
+-- dass ein Gebäude/Banner ERST NACH dem letzten Zustandswechsel des Hex
+-- entsteht - z.B. beim Nachladen oder bei einer neu gegründeten Stadt in
+-- bereits erkundetem Gebiet). Fällt sonst auf UNEXPLORED zurück, bis das
+-- naechste FogOfWarHexStateChanged-Event eintrifft.
+local function currentFogState(key)
+	if type(_G.GetFogHexState) == "function" then
+		local ok, state = pcall(_G.GetFogHexState, key)
+		if ok and state then return state end
+	end
+	return FogOfWarConfig.STATE.UNEXPLORED
 end
 
 --------------------------------------------------------------------------------
@@ -314,7 +428,7 @@ local function showInfoPopup(entry)
 		popupGeneration = popupGeneration + 1
 		local myGeneration = popupGeneration
 
-		popupTitle.Text = "🏰 " .. tostring(info.name or "?")
+		popupTitle.Text = (info.isCapital and "👑 " or "🏰 ") .. tostring(info.name or "?")
 		popupBody.Text = ("Besitzer: %s\nGebäude: %d\nBevölkerung: %d")
 			:format(
 				tostring(info.ownerName or "Niemand"),
@@ -348,8 +462,14 @@ local function onBannerClicked(entry)
 end
 
 --------------------------------------------------------------------------------
--- DATEN LADEN (Owner-Farbe, Name, isMine) - über GetCityOnHex + GetCityPublicInfo
+-- DATEN LADEN (Owner-Farbe, Name, isMine, isCapital) - über GetCityOnHex +
+-- GetCityPublicInfo. Wenn sich isCapital seit dem letzten Refresh geändert
+-- hat (z.B. weil die Stadt gerade zur Hauptstadt wurde, oder umgekehrt
+-- nach einer Eroberung nicht mehr), wird das Banner komplett neu gebaut
+-- (Normal- <-> Hauptstadtbanner haben unterschiedliches Layout).
 --------------------------------------------------------------------------------
+local rebuildBanner -- forward-declaration (siehe unten)
+
 local function applyBannerInfo(entry, info)
 	local color = info.ownerColor or DEFAULT_COLOR
 	entry.flag.BackgroundColor3 = color
@@ -370,6 +490,16 @@ local function refreshBannerData(entry)
 		local ok2, info = Net.Invoke("GetCityPublicInfo", entry.cityId)
 		if not ok2 or not info or not info.exists then return end
 
+		local wantsCapital = info.isCapital and true or false
+		if wantsCapital ~= entry.isCapital then
+			-- Hauptstadt-Status hat sich geändert -> Banner-Layout muss
+			-- gewechselt werden (Normal <-> Hauptstadtbanner).
+			print(("[Banner] Hauptstadt-Status von %s geaendert -> Banner wird neu gebaut")
+				:format(tostring(info.name)))
+			rebuildBanner(entry, wantsCapital)
+			return
+		end
+
 		entry.info = info
 		applyBannerInfo(entry, info)
 	end)
@@ -378,14 +508,29 @@ end
 --------------------------------------------------------------------------------
 -- BANNER AN EIN CITY-GEBÄUDE ANHÄNGEN
 --------------------------------------------------------------------------------
+local function attachBannerUi(buildingModel, isCapital)
+	local adorneePart = findAdorneePart(buildingModel)
+	if not adorneePart then
+		warn("[Banner] Kein BasePart in " .. buildingModel:GetFullName()
+			.. " gefunden - Banner kann nicht angedockt werden!")
+		return nil
+	end
+	return buildBannerGui(adorneePart, isCapital)
+end
+
 local function tryAttachCityBanner(buildingModel)
 	local key, q, r = hexKeyFromBuildingName(buildingModel.Name)
 	if not key then return end
 	if banners[key] then return end -- schon vorhanden
 
-	local ui = buildBannerGui(buildingModel)
+	print("[Banner] Gefunden: " .. buildingModel.Name)
+
+	local ui = attachBannerUi(buildingModel, false)
+	if not ui then return end
+
 	local entry = {
 		key = key, q = q, r = r,
+		buildingModel = buildingModel,
 		billboard = ui.billboard,
 		flag = ui.flag,
 		tipLeft = ui.tipLeft,
@@ -393,9 +538,12 @@ local function tryAttachCityBanner(buildingModel)
 		nameLabel = ui.nameLabel,
 		nameStroke = ui.nameStroke,
 		flagStroke = ui.flagStroke,
+		glow = ui.glow,
+		crownLabel = ui.crownLabel,
 		cityId = nil,
 		info = nil,
 		isMine = false,
+		isCapital = false,
 		fogState = FogOfWarConfig.STATE.UNEXPLORED,
 	}
 	banners[key] = entry
@@ -404,6 +552,41 @@ local function tryAttachCityBanner(buildingModel)
 		onBannerClicked(entry)
 	end)
 
+	-- Sofort den AKTUELLEN Fog-Zustand anwenden (nicht erst auf das
+	-- naechste Event warten - siehe currentFogState()).
+	applyFogState(entry, currentFogState(key))
+
+	refreshBannerData(entry)
+end
+
+-- rebuildBanner(entry, isCapital): zerstört das bestehende Banner-GUI
+-- eines Eintrags und baut es mit dem jeweils passenden Layout
+-- (Normal-/Hauptstadtbanner) neu auf. Wird gebraucht, wenn sich der
+-- Hauptstadt-Status einer bereits bekannten Stadt ändert.
+rebuildBanner = function(entry, isCapital)
+	if entry.billboard and entry.billboard.Parent then
+		entry.billboard:Destroy()
+	end
+
+	local ui = attachBannerUi(entry.buildingModel, isCapital)
+	if not ui then return end
+
+	entry.billboard = ui.billboard
+	entry.flag = ui.flag
+	entry.tipLeft = ui.tipLeft
+	entry.tipRight = ui.tipRight
+	entry.nameLabel = ui.nameLabel
+	entry.nameStroke = ui.nameStroke
+	entry.flagStroke = ui.flagStroke
+	entry.glow = ui.glow
+	entry.crownLabel = ui.crownLabel
+	entry.isCapital = isCapital
+
+	ui.clickButton.Activated:Connect(function()
+		onBannerClicked(entry)
+	end)
+
+	applyFogState(entry, currentFogState(entry.key))
 	refreshBannerData(entry)
 end
 
@@ -426,17 +609,28 @@ end
 -- BUILDINGS-FOLDER BEOBACHTEN
 --------------------------------------------------------------------------------
 local function connectBuildingsWatcher()
+	print("[Banner] Suche Cities in Buildings...")
+
 	local hexMap = workspace:WaitForChild("HexMap", 30)
-	if not hexMap then return end
+	if not hexMap then
+		warn("[Banner] workspace.HexMap nicht gefunden (Timeout)")
+		return
+	end
 	local buildingsFolder = hexMap:WaitForChild("Buildings", 30)
-	if not buildingsFolder then return end
+	if not buildingsFolder then
+		warn("[Banner] HexMap.Buildings nicht gefunden (Timeout)")
+		return
+	end
 
 	for _, child in ipairs(buildingsFolder:GetChildren()) do
 		tryAttachCityBanner(child)
 	end
 
+	-- Neu gebaute/replizierte Cities bekommen SOFORT ein Banner.
 	buildingsFolder.ChildAdded:Connect(function(child)
-		tryAttachCityBanner(child)
+		if child.Name:match("^City_") then
+			tryAttachCityBanner(child)
+		end
 	end)
 
 	buildingsFolder.ChildRemoved:Connect(function(child)
@@ -473,14 +667,33 @@ if hexStateEvent then
 			applyFogState(entry, state)
 		end
 	end)
+else
+	warn("[Banner] FogOfWarHexStateChanged-Event nicht gefunden - Banner-Sichtbarkeit bleibt ggf. unsynchron!")
 end
 
 --------------------------------------------------------------------------------
 -- CityStatsChanged (Server -> Client): Eroberung/Umbenennung -> Banner
--- neu einfärben (Test-Szenario l: Banner-Farbe wechselt nach Eroberung).
+-- neu einfärben (Test-Szenario: Banner-Farbe wechselt nach Eroberung).
 --------------------------------------------------------------------------------
 Net.On("CityStatsChanged", function(cityId)
 	local key = bannerByCityId[cityId]
+	local entry = key and banners[key]
+	if entry then
+		task.delay(0.1, function()
+			refreshBannerData(entry)
+		end)
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- CapitalCityMarked (Server -> Client): eine neue Hauptstadt wurde
+-- gegründet -> das betroffene Banner (falls schon geladen) sofort auf
+-- Hauptstadt-Layout umstellen, ohne auf das naechste CityStatsChanged
+-- warten zu muessen.
+--------------------------------------------------------------------------------
+Net.On("CapitalCityMarked", function(payload)
+	if not payload or not payload.cityId then return end
+	local key = bannerByCityId[payload.cityId]
 	local entry = key and banners[key]
 	if entry then
 		task.delay(0.1, function()
