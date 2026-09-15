@@ -553,7 +553,10 @@ local function buildBannerGui(adorneePart, isCapital, initialText, initialColor)
 		local crownStroke = Instance.new("UIStroke")
 		crownStroke.Thickness = 2
 		crownStroke.Color = Color3.fromRGB(0, 0, 0)
-		crownStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Outline
+		-- FIX: Enum.ApplyStrokeMode.Outline existiert in Roblox NICHT
+		-- (gueltig: Border, Contextual). Der Zugriff warf hier einen Fehler
+		-- und liess buildBannerGui abstuerzen -> kein Banner.
+		crownStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		crownStroke.Parent = crownLabel
 
 		nameLabel.Position = UDim2.new(0.5, 0, 1, -4)
@@ -570,7 +573,11 @@ local function buildBannerGui(adorneePart, isCapital, initialText, initialColor)
 	nameStroke.Name = "NameStroke"
 	nameStroke.Thickness = 2
 	nameStroke.Color = Color3.fromRGB(0, 0, 0)
-	nameStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Outline
+	-- FIX: Enum.ApplyStrokeMode.Outline existiert in Roblox NICHT
+	-- (gueltig: Border, Contextual). Genau DIESER Zugriff war der
+	-- gemeldete Crash in buildBannerGui -> Funktion brach ab, gab kein
+	-- Banner zurueck, Retry/Heal-Loop wiederholte denselben Fehler.
+	nameStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	nameStroke.Parent = nameLabel
 
 	-- Klick-Erkennung: unsichtbarer Button über der gesamten Fahne.
