@@ -118,11 +118,26 @@ function VictorySystem.EliminatePlayer(player, eliminator, reason)
 	end
 
 	-- CITIES neutralisieren (inkl. Hauptstadt-Marker entfernen).
+	-- BANNER-FIX: Der Client (CityBannerController) faerbt Banner ueber das
+	-- CityStatsChanged-Event neu. Ohne diese Benachrichtigung wuerden die
+	-- Banner der neutralisierten Staedte dauerhaft in der Farbe des
+	-- eliminierten Spielers leuchten (und dessen Hauptstadt bliebe im
+	-- Kronen-Look), obwohl die Stadt laengst besitzlos ist.
+	local neutralizedCityIds = {}
 	for _, city in ipairs(CityData.GetCitiesByOwner(player)) do
 		city.owner = nil
+		neutralizedCityIds[#neutralizedCityIds + 1] = city.id
 	end
 	if PlayerData.GetCapitalCityId(player) then
 		PlayerData.SetCapitalCityId(player, nil)
+	end
+
+	-- Erst NACH dem Zuruecksetzen des Hauptstadt-Flags benachrichtigen,
+	-- damit GetCityPublicInfo.isCapital beim Client bereits false ist.
+	if _G.NotifyCityStatsChanged then
+		for _, cityId in ipairs(neutralizedCityIds) do
+			_G.NotifyCityStatsChanged(cityId)
+		end
 	end
 
 	-- PROVINZEN unclaimen (Kopie - UnclaimProvince mutiert die Provinzliste).
